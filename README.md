@@ -128,6 +128,13 @@ Configure Firebase in `frontend/src/lib/firebase.ts` with your project config. E
   }
   ```
 
+## Demo
+
+A short video walkthrough of BharatFinanceAI is available:
+
+- **Local recording path (for reference):** `C:\\Users\\OM KUMAR SINGH\\Videos\\Captures\\BharatFinanceAI - Google Chrome 2026-03-03 12-15-27.mp4`
+- After uploading this video to GitHub (e.g. in `docs/demo/` or as a release asset), update this section with a public link so others can view it directly from the README.
+
 ## API Overview
 
 | Endpoint           | Method | Description                    |
