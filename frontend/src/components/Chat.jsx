@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
+import { onValue, push, query, ref, serverTimestamp } from 'firebase/database'
+import { db } from '../lib/firebase'
+import { useAuth } from '../context/AuthContext'
 
 function formatBotResponse(response) {
   if (!response) return 'Sorry, I did not get a response.'
@@ -81,16 +84,49 @@ function formatBotResponse(response) {
   return `Here is what I found for "${query || ''}":\n${JSON.stringify(result, null, 2)}`
 }
 
-function Chat() {
-  const [messages, setMessages] = useState([
-    {
-      sender: 'bot',
-      text: 'Hi, I am BharatFinanceAI assistant. Ask me about stocks, RSI, MACD, moving averages, Bollinger Bands, gainers/losers, SIP, mutual funds, IPOs, or macro data (repo rate, inflation, GDP).',
-    },
-  ])
+function Chat({ embedded = false, heightClassName = 'h-[480px] md:h-[560px]' }) {
+  const { user } = useAuth()
+  const uid = user?.uid
+  const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef(null)
+
+  useEffect(() => {
+    if (!uid) return
+
+    const chatsRef = ref(db, `users/${uid}/chats`)
+    const chatsQuery = query(chatsRef)
+
+    const unsubscribe = onValue(chatsQuery, (snapshot) => {
+      const val = snapshot.val()
+      if (!val) {
+        setMessages([
+          {
+            id: 'welcome',
+            sender: 'bot',
+            text: 'Hi, I am BharatFinanceAI assistant. Ask me about stocks, RSI, MACD, SIP, mutual funds, IPOs, or macro data (repo rate, inflation, GDP).',
+          },
+        ])
+        return
+      }
+
+      const next = Object.entries(val).map(([id, msg]) => ({
+        id,
+        ...msg,
+      }))
+
+      next.sort((a, b) => {
+        const ta = typeof a.createdAt === 'number' ? a.createdAt : 0
+        const tb = typeof b.createdAt === 'number' ? b.createdAt : 0
+        return ta - tb
+      })
+
+      setMessages(next)
+    })
+
+    return () => unsubscribe()
+  }, [uid])
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -102,23 +138,40 @@ function Chat() {
     const trimmed = input.trim()
     if (!trimmed || loading) return
 
-    const userMessage = { sender: 'user', text: trimmed }
-    setMessages((prev) => [...prev, userMessage])
     setInput('')
     setLoading(true)
 
     try {
+      if (!uid) {
+        throw new Error('Not signed in')
+      }
+
+      const chatsRef = ref(db, `users/${uid}/chats`)
+      await push(chatsRef, {
+        sender: 'user',
+        text: trimmed,
+        createdAt: serverTimestamp(),
+      })
+
       const response = await api.post('/ask', { query: trimmed })
       const botText = formatBotResponse(response.data)
-      const botMessage = { sender: 'bot', text: botText }
-      setMessages((prev) => [...prev, botMessage])
+      await push(chatsRef, {
+        sender: 'bot',
+        text: botText,
+        createdAt: serverTimestamp(),
+      })
     } catch (error) {
+      console.error('Chat /ask error:', error)
       const detail =
-        error.response?.data?.detail || 'Sorry, something went wrong while contacting the server.'
-      setMessages((prev) => [
-        ...prev,
-        { sender: 'bot', text: detail },
-      ])
+        error.response?.data?.detail || error.message || 'Sorry, something went wrong while contacting the server.'
+      if (uid) {
+        const chatsRef = ref(db, `users/${uid}/chats`)
+        await push(chatsRef, {
+          sender: 'bot',
+          text: detail,
+          createdAt: serverTimestamp(),
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -131,10 +184,19 @@ function Chat() {
     }
   }
 
+  const outerClassName = embedded ? 'w-full' : 'max-w-5xl mx-auto'
+  const cardClassName = embedded
+    ? `bg-white text-slate-900 flex flex-col ${heightClassName}`
+    : `bg-white text-slate-900 rounded-xl border-2 border-slate-400 shadow-lg flex flex-col ${heightClassName} overflow-hidden`
+
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="bg-white text-slate-900 rounded-xl border border-slate-200 shadow-lg flex flex-col h-[480px] md:h-[560px] overflow-hidden">
-        <div className="px-4 py-3 border-b-2 border-slate-200 flex items-center justify-between bg-gradient-to-r from-orange-50 to-white rounded-t-xl">
+    <div className={outerClassName}>
+      <div className={cardClassName}>
+        <div
+          className={`px-4 py-3 border-b-2 border-slate-400 flex items-center justify-between bg-gradient-to-r from-orange-50 to-white ${
+            embedded ? '' : 'rounded-t-xl'
+          }`}
+        >
           <h2 className="text-lg font-semibold text-slate-900">AI Chat</h2>
           {loading && <span className="text-xs text-orange-500">BharatFinanceAI is thinking...</span>}
         </div>
@@ -143,14 +205,14 @@ function Chat() {
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
           {messages.map((msg, index) => (
             <div
-              key={index}
+              key={msg.id || index}
               className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
                 className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap break-words border ${
                   msg.sender === 'user'
                     ? 'bg-orange-500 text-white border-orange-500 rounded-br-sm'
-                    : 'bg-slate-50 text-slate-900 border-slate-200 rounded-bl-sm'
+                    : 'bg-slate-50 text-slate-900 border-slate-300 rounded-bl-sm'
                 }`}
               >
                 {msg.text}
@@ -161,7 +223,7 @@ function Chat() {
         </div>
 
         {/* Input */}
-        <div className="border-t-2 border-slate-200 px-3 py-3 bg-slate-50 rounded-b-xl">
+        <div className={`border-t-2 border-slate-400 px-3 py-3 bg-slate-50 ${embedded ? '' : 'rounded-b-xl'}`}>
           <div className="flex items-end gap-2">
             <textarea
               rows={1}
@@ -169,7 +231,7 @@ function Chat() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder='Ask a question, e.g. "What is the RSI of Reliance?"'
-              className="flex-1 resize-none rounded-lg bg-white text-slate-900 border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 placeholder:text-slate-400"
+              className="flex-1 resize-none rounded-lg bg-white text-slate-900 border-2 border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 placeholder:text-slate-400"
             />
             <button
               type="button"

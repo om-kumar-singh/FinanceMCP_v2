@@ -85,10 +85,21 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS: use CORS_ORIGINS env var (comma-separated) for production, else localhost
+# CORS: use CORS_ORIGINS env var (comma-separated) for production.
+# For local development, allow common Vite dev ports on localhost.
 _default_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
+    "http://localhost:5176",
+    "http://127.0.0.1:5176",
+    "http://localhost:5177",
+    "http://127.0.0.1:5177",
+    "http://localhost:5178",
+    "http://127.0.0.1:5178",
 ]
 _cors_origins = os.getenv("CORS_ORIGINS", "").strip()
 origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] or _default_origins

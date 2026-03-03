@@ -169,7 +169,7 @@ function StockSearch({ onStockSelect }) {
   return (
     <div ref={containerRef} className="relative">
       {/* Search input wrapper */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-white border border-slate-200 rounded-xl shadow-md hover:shadow-lg focus-within:border-orange-500 focus-within:shadow-lg transition-all">
+      <div className="flex items-center gap-3 px-4 py-3 bg-white border-2 border-slate-400 rounded-xl shadow-md hover:shadow-lg focus-within:border-orange-500 focus-within:shadow-lg transition-all">
         {/* Search icon */}
         <span className="text-gray-400">
           <svg
@@ -213,15 +213,15 @@ function StockSearch({ onStockSelect }) {
 
       {/* Suggestions dropdown */}
       {isOpen && (suggestions?.length ?? 0) > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-white rounded-xl shadow-xl border border-slate-200 max-h-80 overflow-y-auto">
-          <div className="px-4 py-2 text-xs font-semibold text-gray-500 border-b border-gray-100">
+        <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-white rounded-xl shadow-xl border-2 border-slate-400 max-h-80 overflow-y-auto">
+          <div className="px-4 py-2 text-xs font-semibold text-gray-600 border-b border-slate-300">
             {query.trim() ? `Results for "${query.trim()}"` : 'Popular Stocks'}
           </div>
 
           {suggestions.map((stock, index) => (
             <div
               key={stock.symbol}
-              className={`flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0 cursor-pointer transition-colors ${
+              className={`flex items-center gap-3 px-4 py-3 border-b border-slate-200 last:border-0 cursor-pointer transition-colors ${
                 index === highlightedIndex ? 'bg-orange-50' : 'hover:bg-orange-50'
               }`}
               onClick={() => selectStock(stock)}
@@ -250,7 +250,7 @@ function StockSearch({ onStockSelect }) {
       )}
 
       {isOpen && !isLoading && suggestions.length === 0 && query.trim() && (
-        <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-4 text-sm text-gray-600">
+        <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-white rounded-xl shadow-xl border-2 border-slate-400 p-4 text-sm text-gray-700">
           No stocks found for &quot;{query.trim()}&quot;
           <br />
           <span className="text-xs text-gray-400">

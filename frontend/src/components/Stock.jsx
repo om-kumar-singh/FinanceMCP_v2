@@ -102,7 +102,7 @@ function Stock() {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Input and action card */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+      <div className="bg-white rounded-xl border-2 border-slate-400 shadow-lg p-6">
         <h2 className="text-xl font-semibold text-gray-800 mb-4">Stock Dashboard</h2>
 
         <div className="flex flex-col gap-3 mb-2">
@@ -116,7 +116,7 @@ function Stock() {
       {/* Data cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Stock Data Card */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+        <div className="bg-white rounded-xl border-2 border-slate-400 shadow-lg p-6">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">Stock Data</h3>
 
           {stockError && (
@@ -131,7 +131,7 @@ function Stock() {
 
           {stockData && (
             <div className="grid grid-cols-1 gap-3">
-              <div className="pb-2 border-b border-gray-100">
+              <div className="pb-2 border-b border-slate-300">
                 <div className="text-base font-semibold text-gray-900">
                   {selectedName || stockData.symbol}
                 </div>
@@ -139,31 +139,31 @@ function Stock() {
                   NSE: {stockData.symbol?.replace('.NS', '')}
                 </div>
               </div>
-              <div className="flex justify-between py-1 border-b border-gray-100">
+              <div className="flex justify-between py-1 border-b border-slate-200">
                 <span className="text-gray-600">Price</span>
                 <span className="font-medium">₹{stockData.price?.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between py-1 border-b border-gray-100">
+              <div className="flex justify-between py-1 border-b border-slate-200">
                 <span className="text-gray-600">Change</span>
                 <span className={`font-medium ${changeColor(stockData.change)}`}>
                   {stockData.change >= 0 ? '+' : ''}
                   {stockData.change}
                 </span>
               </div>
-              <div className="flex justify-between py-1 border-b border-gray-100">
+              <div className="flex justify-between py-1 border-b border-slate-200">
                 <span className="text-gray-600">Change %</span>
                 <span className={`font-medium ${changeColor(stockData.change_percent)}`}>
                   {stockData.change_percent >= 0 ? '+' : ''}
                   {stockData.change_percent}%
                 </span>
               </div>
-              <div className="flex justify-between py-1 border-b border-gray-100">
+              <div className="flex justify-between py-1 border-b border-slate-200">
                 <span className="text-gray-600">Volume</span>
                 <span className="font-medium">
                   {stockData.volume?.toLocaleString()}
                 </span>
               </div>
-              <div className="flex justify-between py-1 border-b border-gray-100">
+              <div className="flex justify-between py-1 border-b border-slate-200">
                 <span className="text-gray-600">Day High</span>
                 <span className="font-medium">
                   ₹{stockData.day_high?.toLocaleString()}
@@ -186,7 +186,7 @@ function Stock() {
         </div>
 
         {/* RSI Card */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+        <div className="bg-white rounded-xl border-2 border-slate-400 shadow-lg p-6">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">RSI</h3>
 
           {rsiError && (
@@ -222,7 +222,7 @@ function Stock() {
         </div>
 
         {/* MACD Card */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6 md:col-span-2">
+        <div className="bg-white rounded-xl border-2 border-slate-400 shadow-lg p-6 md:col-span-2">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">MACD</h3>
 
           {macdError && (

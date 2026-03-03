@@ -5,7 +5,16 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        bharat: {
+          saffron: "#FF9933",
+          white: "#FFFFFF",
+          green: "#128807",
+          navy: "#000080",
+        },
+      },
+    },
   },
   plugins: [],
 }
