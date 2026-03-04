@@ -128,6 +128,13 @@ app.include_router(sector_router)
 app.include_router(portfolio_router)
 app.include_router(news_router)
 
+# Resilience router: lazy-loaded. Import only when including; if it fails, other APIs unaffected.
+try:
+    from app.routers.resilience import resilience_router
+    app.include_router(resilience_router)
+except Exception as e:
+    print("Resilience module skipped (other APIs unaffected):", e)
+
 
 @app.on_event("startup")
 async def startup_event() -> None:

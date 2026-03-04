@@ -8,3 +8,4 @@ requests
 beautifulsoup4
 python-dotenv
 fastmcp>=0.1.0
+scikit-learn

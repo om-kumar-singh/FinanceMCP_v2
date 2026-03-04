@@ -1,10 +1,14 @@
 import axios from 'axios'
 
+// In dev, use Vite proxy (/api → localhost:8000) to avoid CORS/network errors.
+const baseURL = import.meta.env.DEV ? '/api' : (import.meta.env.VITE_API_URL || 'http://localhost:8000')
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  baseURL,
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 60000, // Resilience predictor can take 30+ seconds (ML, Monte Carlo, yfinance)
 })
 
 export const searchStocks = async (query, limit = 8, signal) => {
@@ -54,6 +58,11 @@ export const calculateSip = async (monthlyInvestment, years, annualReturn) => {
       annual_return: annualReturn,
     },
   })
+  return response.data
+}
+
+export const predictResilience = async (payload) => {
+  const response = await api.post('/predict-resilience', payload)
   return response.data
 }
 

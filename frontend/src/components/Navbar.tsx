@@ -39,6 +39,12 @@ const Navbar: FC = () => {
             >
               About
             </a>
+            <Link
+              to="/resilience-predictor"
+              className="px-3 py-1.5 rounded-full hover:bg-bharat-white/10 hover:text-bharat-saffron transition-colors"
+            >
+              Resilience
+            </Link>
 
             {!loading && !user && (
               <Link

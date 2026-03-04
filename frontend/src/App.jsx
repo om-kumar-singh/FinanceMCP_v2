@@ -4,6 +4,7 @@ import Footer from './components/Footer'
 import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
 import Auth from './pages/Auth'
+import ResiliencePredictor from './pages/ResiliencePredictor'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 
@@ -20,6 +21,16 @@ function App() {
               <ProtectedRoute>
                 <ErrorBoundary>
                   <Dashboard />
+                </ErrorBoundary>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/resilience-predictor"
+            element={
+              <ProtectedRoute>
+                <ErrorBoundary>
+                  <ResiliencePredictor />
                 </ErrorBoundary>
               </ProtectedRoute>
             }
