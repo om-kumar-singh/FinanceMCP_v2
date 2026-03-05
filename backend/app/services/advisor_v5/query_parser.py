@@ -10,21 +10,143 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
+from app.services.symbol_dictionary import COMMON_COMPANY_ALIASES, BARE_TOKEN_ALLOWLIST
+
 
 def _extract_symbols(text: str) -> List[str]:
     """
-    Very lightweight symbol extractor.
-    Recognises patterns like RELIANCE, RELIANCE.NS, TCS, TCS.NS, etc.
+    Symbol extractor with India-centric alias support.
+
+    - Recognizes company names like "HDFC Bank" using a curated mapping
+    - Recognizes yfinance tickers like RELIANCE.NS
+    - Recognizes bare tickers like TCS, INFY (filters common stopwords)
     """
-    tokens = re.findall(r"\b[A-Z]{2,10}(?:\.NS|\.BO)?\b", text.upper())
+    raw = (text or "").strip()
+    if not raw:
+        return []
+
+    lower = raw.lower()
+
+    # 1) Company aliases (prefer longer phrases first)
+    found: List[str] = []
+    for k, sym in sorted(COMMON_COMPANY_ALIASES.items(), key=lambda kv: -len(kv[0])):
+        if k in lower:
+            found.append(sym)
+
+    # 2) Fully-qualified tickers (most reliable)
+    qualified = re.findall(r"\b[A-Z][A-Z0-9&\-]{1,15}\.(?:NS|BO)\b", raw.upper())
+    found.extend(qualified)
+
+    # 3) Bare tokens (avoid 2-letter common words like IS/AN/TO)
+    # Bare-token stopwords to avoid accidental ticker resolution:
+    # e.g. "Is TCS..." should not treat "IS" as a symbol.
+    stop = {
+        "I",
+        "ME",
+        "MY",
+        "WE",
+        "YOU",
+        "US",
+        "IT",
+        "THIS",
+        "THAT",
+        "THESE",
+        "THOSE",
+        "IS",
+        "AM",
+        "ARE",
+        "WAS",
+        "WERE",
+        "BE",
+        "BEEN",
+        "BEING",
+        "HAVE",
+        "HAS",
+        "HAD",
+        "DO",
+        "DID",
+        "DOES",
+        "AN",
+        "THE",
+        "A",
+        "TO",
+        "OF",
+        "IN",
+        "ON",
+        "FOR",
+        "WITH",
+        "WITHOUT",
+        "AND",
+        "OR",
+        "VS",
+        "VERSUS",
+        "COMPARE",
+        "BETTER",
+        "THAN",
+        "WHAT",
+        "WHICH",
+        "WHY",
+        "HOW",
+        "ABOUT",
+        "TELL",
+        "SHOW",
+        "GIVE",
+        "TODAY",
+        "NOW",
+        "BUY",
+        "SELL",
+        "HOLD",
+        "INVEST",
+        "INVESTMENT",
+        "PORTFOLIO",
+        "RISK",
+        "ANALYZE",
+        "ANALYSE",
+        "ANALYSIS",
+        "PREDICT",
+        "PREDICTION",
+        "FORECAST",
+        "MODEL",
+        "TARGET",
+        "PRICE",
+        "STOCK",
+        "STOCKS",
+        "VOLUME",
+        "UNUSUAL",
+        "MOMENTUM",
+        "BULLISH",
+        "BEARISH",
+        "REGIME",
+        "MARKET",
+        "NEWS",
+        "HEADLINES",
+        "RSI",
+        "MACD",
+        "SMA",
+        "EMA",
+        "PE",
+        "P/E",
+        "NAV",
+        "NSE",
+        "BSE",
+        "RBI",
+        "GDP",
+        "CPI",
+    }
+    for tok in re.findall(r"\b[A-Z][A-Z0-9&\-]{1,15}\b", raw.upper()):
+        if tok in stop:
+            continue
+        if len(tok) >= 3 or tok in BARE_TOKEN_ALLOWLIST:
+            found.append(tok)
+
     # Deduplicate while preserving order
     seen = set()
-    symbols: List[str] = []
-    for t in tokens:
-        if t not in seen:
+    out: List[str] = []
+    for t in found:
+        if t and t not in seen:
             seen.add(t)
-            symbols.append(t)
-    return symbols
+            out.append(t)
+    return out
 
 
 def parse_query(query: str, *, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

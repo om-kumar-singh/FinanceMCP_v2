@@ -2,6 +2,8 @@
 Stock API routes.
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services.stock_search_service import (
@@ -18,6 +20,8 @@ from app.services.stock_service import (
     get_stock_quote,
     get_top_gainers_losers,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stock", tags=["stock"])
 
@@ -80,7 +84,14 @@ def stock_quote(symbol: str):
     Example: GET /stock/RELIANCE, GET /stock/TCS.NS
     Returns: symbol, price, pe, dividendYield, marketCap, sector, plus change/volume etc.
     """
-    data = get_stock_detail(symbol)
+    try:
+        data = get_stock_detail(symbol)
+    except Exception:
+        logger.error("Stock detail failed: symbol=%s", symbol, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Market data service temporarily unavailable. Please try again.",
+        )
     if data is None or (isinstance(data, dict) and data.get("error")):
         raise HTTPException(
             status_code=404,
@@ -104,7 +115,14 @@ def stock_rsi(symbol: str, period: int = 14):
             status_code=400,
             detail="Period must be between 2 and 100.",
         )
-    data = calculate_rsi(symbol, period=period)
+    try:
+        data = calculate_rsi(symbol, period=period)
+    except Exception:
+        logger.error("RSI API failed: symbol=%s period=%s", symbol, period, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="RSI service temporarily unavailable. Please try again.",
+        )
     if data is None or (isinstance(data, dict) and data.get("error")):
         raise HTTPException(
             status_code=404,
@@ -123,7 +141,14 @@ def stock_macd(symbol: str):
 
     Example: GET /macd/RELIANCE.NS
     """
-    data = calculate_macd(symbol)
+    try:
+        data = calculate_macd(symbol)
+    except Exception:
+        logger.error("MACD API failed: symbol=%s", symbol, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="MACD service temporarily unavailable. Please try again.",
+        )
     if data is None or (isinstance(data, dict) and data.get("error")):
         raise HTTPException(
             status_code=404,
@@ -147,7 +172,14 @@ def top_gainers_losers(count: int = 10):
             status_code=400,
             detail="Count must be between 1 and 50.",
         )
-    data = get_top_gainers_losers(count=count)
+    try:
+        data = get_top_gainers_losers(count=count)
+    except Exception:
+        logger.error("Gainers/losers API failed: count=%s", count, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to fetch gainers/losers data. Service temporarily unavailable.",
+        )
     if data is None:
         raise HTTPException(
             status_code=503,
@@ -166,7 +198,14 @@ def stock_moving_averages(symbol: str):
 
     Example: GET /moving-averages/RELIANCE.NS
     """
-    data = calculate_moving_averages(symbol)
+    try:
+        data = calculate_moving_averages(symbol)
+    except Exception:
+        logger.error("Moving averages API failed: symbol=%s", symbol, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Moving averages service temporarily unavailable. Please try again.",
+        )
     if data is None or (isinstance(data, dict) and data.get("error")):
         raise HTTPException(
             status_code=404,
@@ -185,7 +224,14 @@ def stock_bollinger(symbol: str):
 
     Example: GET /bollinger/RELIANCE.NS
     """
-    data = calculate_bollinger_bands(symbol)
+    try:
+        data = calculate_bollinger_bands(symbol)
+    except Exception:
+        logger.error("Bollinger API failed: symbol=%s", symbol, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Bollinger Bands service temporarily unavailable. Please try again.",
+        )
     if data is None or (isinstance(data, dict) and data.get("error")):
         raise HTTPException(
             status_code=404,

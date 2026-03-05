@@ -3,12 +3,13 @@ BharatFinanceAI - FastAPI Backend
 """
 
 import json
+import logging
 import os
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.routes.compare_routes import compare_router
@@ -39,6 +40,39 @@ from app.utils.response_optimizer import MAX_RESPONSE_SIZE, optimize_response
 # This ensures GEMINI_API_KEY (and other secrets) are available when running locally.
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(dotenv_path=_env_path, override=False)
+
+def _setup_logging() -> None:
+    level_name = (os.getenv("LOG_LEVEL") or "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=level, format=fmt)
+    else:
+        root.setLevel(level)
+
+    # Best-effort file logging (never block startup if it fails).
+    try:
+        from logging.handlers import RotatingFileHandler
+
+        log_path = os.path.join(os.path.dirname(__file__), "server.log")
+        handler = RotatingFileHandler(
+            log_path,
+            maxBytes=2_000_000,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter(fmt))
+        root.addHandler(handler)
+    except Exception:
+        # If file handler cannot be created, console logging still works.
+        pass
+
+
+_setup_logging()
+logger = logging.getLogger(__name__)
 
 
 class ResponseOptimizerMiddleware(BaseHTTPMiddleware):
@@ -127,6 +161,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(ResponseOptimizerMiddleware)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    # Never leak a raw 500 to clients; return 503 with a stable JSON payload.
+    logger.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=True)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Service temporarily unavailable. Please try again.",
+            "source": "api",
+            "result": None,
+            "error": str(exc)[:300] if exc else "unknown_error",
+        },
+    )
 
 app.include_router(compare_router)
 app.include_router(history_router)

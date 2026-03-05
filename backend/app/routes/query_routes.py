@@ -2,10 +2,15 @@
 AI query API routes.
 """
 
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from app.services.query_service import process_query
+from app.services.chat_advisor_service import handle_chat_query
+from app.services.conversation_memory import get_context, update_context
+
+logger = logging.getLogger(__name__)
 
 query_router = APIRouter(tags=["query"])
 
@@ -18,7 +23,7 @@ class QueryRequest(BaseModel):
 
 
 @query_router.post("/ask")
-def ask_query(request: QueryRequest):
+async def ask_query(request: Request, body: QueryRequest):
     """
     Process natural language financial query.
 
@@ -26,26 +31,30 @@ def ask_query(request: QueryRequest):
 
     Example: POST /ask with {"query": "What is the stock price of TCS?"}
     """
+    client_id = request.headers.get("X-Session-Id") or (request.client.host if request.client else None) or "anonymous"
+    ctx = get_context(client_id)
     try:
-        result = process_query(request.query)
-        return result
+        payload, updates = await handle_chat_query(body.query, context=ctx)
+        if updates:
+            update_context(client_id, **updates)
+        return payload
     except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred while processing the query.",
-        )
+        logger.error("Ask API failed", exc_info=True)
+        return {"message": "AI advisor is temporarily unavailable."}
 
 
 @query_router.post("/chat")
-def chat(request: QueryRequest):
+async def chat(request: Request, body: QueryRequest):
     """
     Chat endpoint for the AI advisor. Same as /ask; accepts {"query": "user message"}.
     """
+    client_id = request.headers.get("X-Session-Id") or (request.client.host if request.client else None) or "anonymous"
+    ctx = get_context(client_id)
     try:
-        result = process_query(request.query)
-        return result
+        payload, updates = await handle_chat_query(body.query, context=ctx)
+        if updates:
+            update_context(client_id, **updates)
+        return payload
     except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred while processing the query.",
-        )
+        logger.error("Chat API failed", exc_info=True)
+        return {"message": "AI advisor is temporarily unavailable."}

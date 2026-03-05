@@ -8,6 +8,7 @@ import datetime as _dt
 from typing import List, Dict, Any
 
 import yfinance as yf
+import time as _time
 
 
 IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
@@ -95,6 +96,17 @@ def get_market_news(ticker: str) -> List[Dict[str, Any]]:
           }
       )
 
-  # Return a reasonable number of items for UI / MCP usage
-  return items[:20]
+  # Rotation/jitter: repeated calls should not return identical headlines ordering.
+  # Keep it deterministic-ish per time window to aid caching while still varying.
+  if len(items) <= 1:
+      return items[:20]
+
+  try:
+      n = len(items)
+      # Change offset roughly every ~45 seconds.
+      offset = int((_time.time() // 45) % n)
+      rotated = items[offset:] + items[:offset]
+      return rotated[:20]
+  except Exception:
+      return items[:20]
 

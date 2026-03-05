@@ -2,10 +2,14 @@
 Stock price history API for charts.
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services.stock_service import get_stock_history
 from app.services.stock_search_service import resolve_symbol
+
+logger = logging.getLogger(__name__)
 
 history_router = APIRouter(prefix="/history", tags=["history"])
 
@@ -32,10 +36,17 @@ def stock_history(
 
     Example: GET /history/RELIANCE?period=6mo
     """
-    data = get_stock_history(symbol, period=period)
+    try:
+        data = get_stock_history(symbol, period=period)
+    except Exception:
+        logger.error("History API failed: symbol=%s period=%s", symbol, period, exc_info=True)
+        data = None
     if data is None:
         # Fallback mock so UI never breaks
-        resolved = resolve_symbol(symbol) or symbol
+        try:
+            resolved = resolve_symbol(symbol) or symbol
+        except Exception:
+            resolved = symbol
         return {
             **MOCK_HISTORY,
             "symbol": resolved if resolved else symbol,

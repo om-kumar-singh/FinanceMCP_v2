@@ -2,6 +2,8 @@
 Mutual fund and SIP API routes.
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from app.services.mutual_fund_service import (
@@ -10,6 +12,8 @@ from app.services.mutual_fund_service import (
     get_mutual_fund_nav,
     search_mutual_funds,
 )
+
+logger = logging.getLogger(__name__)
 
 mutual_fund_router = APIRouter(tags=["mutual-fund"])
 
@@ -21,7 +25,14 @@ def mutual_fund_nav(scheme_code: str):
 
     Example: GET /mutual-fund/119551
     """
-    data = get_mutual_fund_nav(scheme_code)
+    try:
+        data = get_mutual_fund_nav(scheme_code)
+    except Exception:
+        logger.error("Mutual fund NAV API failed: scheme_code=%s", scheme_code, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Mutual fund service temporarily unavailable. Please try again.",
+        )
     if data is None:
         raise HTTPException(
             status_code=404,
@@ -72,7 +83,14 @@ def mutual_fund_search(query: str):
             detail="query must be a non-empty string.",
         )
 
-    data = search_mutual_funds(query)
+    try:
+        data = search_mutual_funds(query)
+    except Exception:
+        logger.error("Mutual fund search API failed: query=%s", query, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to search mutual funds. Service temporarily unavailable.",
+        )
     if data is None:
         raise HTTPException(
             status_code=503,

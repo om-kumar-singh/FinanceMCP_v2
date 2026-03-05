@@ -2,10 +2,15 @@
 Stock data service using yfinance.
 """
 
-import pandas_ta as ta
-import yfinance as yf
+import logging
+import math
 
+import pandas_ta as ta
+
+from app.services.market_data_service import safe_fetch_history, safe_fetch_info
 from app.services.stock_search_service import resolve_symbol
+
+logger = logging.getLogger(__name__)
 
 # NIFTY 50 symbols (NSE)
 NIFTY_50_SYMBOLS = [
@@ -41,6 +46,20 @@ NIFTY_50_SYMBOLS = [
     "JSWSTEEL.NS",
 ]
 
+def _is_nan(v: float) -> bool:
+    try:
+        fv = float(v)
+    except Exception:
+        return True
+    return fv != fv or math.isnan(fv)
+
+
+def _error(source: str, message: str, symbol: str | None = None) -> dict:
+    payload: dict = {"source": source, "error": message}
+    if symbol:
+        payload["symbol"] = symbol
+    return payload
+
 
 def get_stock_quote(symbol: str) -> dict | None:
     """
@@ -62,29 +81,43 @@ def get_stock_quote(symbol: str) -> dict | None:
             return None
         symbol = resolved
 
-    ticker = yf.Ticker(symbol)
-
     # Fetch 5 days of history to ensure we have previous close
-    hist = ticker.history(period="5d")
-
-    if hist is None or hist.empty:
-        return None
+    hist, resolved_symbol, err = safe_fetch_history(symbol, period="5d")
+    symbol = resolved_symbol or symbol
+    if hist is None:
+        return None if err else None
 
     # Need at least 2 rows for previous close
     if len(hist) < 2:
         return None
 
+    if "Close" not in getattr(hist, "columns", []):
+        return _error("market_data", "Market data missing 'Close' column.", symbol)
+
     latest = hist.iloc[-1]
     previous = hist.iloc[-2]
 
-    close = float(latest["Close"])
-    previous_close = float(previous["Close"])
+    try:
+        close = float(latest.get("Close"))
+        previous_close = float(previous.get("Close"))
+    except Exception:
+        return _error("market_data", "Invalid close price data received.", symbol)
+
     price = round(close, 2)
     change = round(close - previous_close, 2)
     change_percent = round((change / previous_close) * 100, 2) if previous_close else 0
-    volume = int(latest["Volume"]) if "Volume" in latest else 0
-    day_high = round(float(latest["High"]), 2) if "High" in latest else price
-    day_low = round(float(latest["Low"]), 2) if "Low" in latest else price
+    try:
+        volume = int(latest.get("Volume")) if "Volume" in latest else 0
+    except Exception:
+        volume = 0
+    try:
+        day_high = round(float(latest.get("High")), 2) if "High" in latest else price
+    except Exception:
+        day_high = price
+    try:
+        day_low = round(float(latest.get("Low")), 2) if "Low" in latest else price
+    except Exception:
+        day_low = price
 
     return {
         "symbol": symbol,
@@ -109,30 +142,70 @@ def get_stock_detail(symbol: str) -> dict | None:
         return None
 
     symbol_clean = quote["symbol"]
-    ticker = yf.Ticker(symbol_clean)
-    try:
-        info = ticker.info or {}
-    except Exception:
-        info = {}
+    info, _ = safe_fetch_info(symbol_clean)
 
     pe = info.get("trailingPE") or info.get("forwardPE")
     if pe is not None:
-        pe = round(float(pe), 1)
+        try:
+            pe = round(float(pe), 1)
+        except Exception:
+            pe = None
 
-    div_yield = info.get("dividendYield")
-    if div_yield is not None:
-        div_yield = round(float(div_yield) * 100, 2) if div_yield else 0.0
-    else:
-        div_yield = 0.0
+    # Dividend yield (percent)
+    # Prefer correct formula: annual_dividend / price * 100 using dividendRate when available.
+    # Fallback to yfinance's dividendYield (ratio) when dividendRate is missing.
+    div_yield = 0.0
+    try:
+        price = float(quote.get("price") or 0)
+    except Exception:
+        price = 0.0
+    dividend_rate = info.get("dividendRate")  # annual cash dividend per share (usually)
+    dividend_yield_ratio = info.get("dividendYield")  # typically ratio (0.02 => 2%)
+
+    computed = None
+    if dividend_rate is not None and price > 0:
+        try:
+            computed = (float(dividend_rate) / price) * 100.0
+        except Exception:
+            computed = None
+
+    fallback = None
+    if dividend_yield_ratio is not None:
+        try:
+            fallback = float(dividend_yield_ratio) * 100.0 if dividend_yield_ratio else 0.0
+        except Exception:
+            fallback = None
+
+    # Choose the more plausible value when both exist.
+    if computed is not None and computed >= 0:
+        if fallback is not None and fallback >= 0:
+            # If one value is clearly unrealistic, choose the other.
+            if computed > 30 and fallback <= 30:
+                div_yield = fallback
+            elif fallback > 30 and computed <= 30:
+                div_yield = computed
+            else:
+                # Otherwise prefer computed formula.
+                div_yield = computed
+        else:
+            div_yield = computed
+    elif fallback is not None and fallback >= 0:
+        div_yield = fallback
+
+    div_yield = round(float(div_yield), 2)
 
     mcap = info.get("marketCap")
-    if mcap is not None and mcap > 0:
-        if mcap >= 1_00_000_00_00_000:  # >= 1L Cr
-            market_cap_str = f"{mcap / 1_00_000_00_00_000:.1f}L Cr"
-        elif mcap >= 1_00_000_00_000:  # >= 1000 Cr
-            market_cap_str = f"{mcap / 1_00_000_00_000:.0f} Cr"
+    try:
+        mcap_val = float(mcap) if mcap is not None else None
+    except Exception:
+        mcap_val = None
+    if mcap_val is not None and mcap_val > 0:
+        if mcap_val >= 1_00_000_00_00_000:  # >= 1L Cr
+            market_cap_str = f"{mcap_val / 1_00_000_00_00_000:.1f}L Cr"
+        elif mcap_val >= 1_00_000_00_000:  # >= 1000 Cr
+            market_cap_str = f"{mcap_val / 1_00_000_00_000:.0f} Cr"
         else:
-            market_cap_str = f"{mcap / 1_00_000_00:.0f} Cr"
+            market_cap_str = f"{mcap_val / 1_00_000_00:.0f} Cr"
     else:
         market_cap_str = "N/A"
 
@@ -174,10 +247,12 @@ def get_stock_history(symbol: str, period: str = "6mo") -> dict | None:
     if period not in ("1mo", "3mo", "6mo", "1y", "2y"):
         period = "6mo"
 
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period=period)
+    hist, resolved_symbol, _err = safe_fetch_history(symbol, period=period)
+    symbol = resolved_symbol or symbol
+    if hist is None or len(hist) < 2:
+        return None
 
-    if hist is None or hist.empty or len(hist) < 2:
+    if "Close" not in getattr(hist, "columns", []):
         return None
 
     hist = hist.reset_index()
@@ -197,11 +272,26 @@ def get_stock_history(symbol: str, period: str = "6mo") -> dict | None:
             dates.append(d.strftime("%Y-%m-%d"))
         else:
             dates.append(str(d)[:10])
-        opens.append(round(float(row.get("Open", 0)), 2))
-        highs.append(round(float(row.get("High", 0)), 2))
-        lows.append(round(float(row.get("Low", 0)), 2))
-        closes.append(round(float(row.get("Close", 0)), 2))
-        volumes.append(int(row.get("Volume", 0)))
+        try:
+            opens.append(round(float(row.get("Open", 0) or 0), 2))
+        except Exception:
+            opens.append(0)
+        try:
+            highs.append(round(float(row.get("High", 0) or 0), 2))
+        except Exception:
+            highs.append(0)
+        try:
+            lows.append(round(float(row.get("Low", 0) or 0), 2))
+        except Exception:
+            lows.append(0)
+        try:
+            closes.append(round(float(row.get("Close", 0) or 0), 2))
+        except Exception:
+            closes.append(0)
+        try:
+            volumes.append(int(row.get("Volume", 0) or 0))
+        except Exception:
+            volumes.append(0)
 
     return {
         "symbol": symbol,
@@ -239,24 +329,36 @@ def calculate_rsi(symbol: str, period: int = 14) -> dict | None:
             return None
         symbol = resolved
 
-    ticker = yf.Ticker(symbol)
-
     # Fetch enough history for RSI (period * 2 ensures sufficient data)
     days_needed = max(period * 2, 60)
-    hist = ticker.history(period=f"{days_needed}d")
+    hist, resolved_symbol, err = safe_fetch_history(symbol, period=f"{days_needed}d")
+    symbol = resolved_symbol or symbol
+    if hist is None:
+        return _error("market_data", err or "No market data available for symbol", symbol)
 
-    if hist is None or hist.empty:
-        return None
+    if "Close" not in getattr(hist, "columns", []):
+        return _error("market_data", "Market data missing 'Close' column.", symbol)
 
-    if len(hist) < period + 1:
-        return None
+    close = hist["Close"].dropna()
+    if len(close) < period + 1:
+        return _error("indicator", "Not enough data for indicator calculation", symbol)
 
-    rsi_series = ta.rsi(hist["Close"], length=period)
+    try:
+        rsi_series = ta.rsi(close, length=period)
+    except Exception:
+        logger.error("RSI calculation failed: symbol=%s period=%s", symbol, period, exc_info=True)
+        return _error("indicator", "RSI calculation failed", symbol)
 
     if rsi_series is None or rsi_series.empty:
-        return None
+        return _error("indicator", "RSI calculation returned empty result", symbol)
 
-    latest_rsi = float(rsi_series.iloc[-1])
+    try:
+        latest_rsi = float(rsi_series.iloc[-1])
+    except Exception:
+        return _error("indicator", "RSI calculation returned invalid value", symbol)
+
+    if _is_nan(latest_rsi):
+        return _error("indicator", "RSI calculation returned NaN (insufficient warmup)", symbol)
 
     if latest_rsi > 70:
         signal = "overbought"
@@ -293,35 +395,44 @@ def calculate_macd(symbol: str) -> dict | None:
             return None
         symbol = resolved
 
-    ticker = yf.Ticker(symbol)
-
     # Fetch at least 60 days of history for MACD (needs ~35+ for default 12/26/9)
-    hist = ticker.history(period="60d")
+    hist, resolved_symbol, err = safe_fetch_history(symbol, period="60d")
+    symbol = resolved_symbol or symbol
+    if hist is None:
+        return _error("market_data", err or "No market data available for symbol", symbol)
 
-    if hist is None or hist.empty:
-        return None
+    if "Close" not in getattr(hist, "columns", []):
+        return _error("market_data", "Market data missing 'Close' column.", symbol)
 
-    if len(hist) < 35:
-        return None
+    close = hist["Close"].dropna()
+    if len(close) < 35:
+        return _error("indicator", "Not enough data for indicator calculation", symbol)
 
-    macd_df = ta.macd(hist["Close"], fast=12, slow=26, signal=9)
+    try:
+        macd_df = ta.macd(close, fast=12, slow=26, signal=9)
+    except Exception:
+        logger.error("MACD calculation failed: symbol=%s", symbol, exc_info=True)
+        return _error("indicator", "MACD calculation failed", symbol)
 
     if macd_df is None or macd_df.empty:
-        return None
+        return _error("indicator", "MACD calculation returned empty result", symbol)
 
     # pandas_ta returns DataFrame with MACD line, Signal line, Histogram columns
     cols = macd_df.columns.tolist()
     if len(cols) < 3:
-        return None
+        return _error("indicator", "MACD calculation returned unexpected output", symbol)
 
     latest = macd_df.iloc[-1]
-    macd_line = float(latest[cols[0]])
-    signal_line = float(latest[cols[1]])
-    histogram = float(latest[cols[2]])
+    try:
+        macd_line = float(latest[cols[0]])
+        signal_line = float(latest[cols[1]])
+        histogram = float(latest[cols[2]])
+    except Exception:
+        return _error("indicator", "MACD calculation returned invalid values", symbol)
 
     # Handle NaN from insufficient warmup
-    if any(v != v for v in (macd_line, signal_line, histogram)):
-        return None
+    if any(_is_nan(v) for v in (macd_line, signal_line, histogram)):
+        return _error("indicator", "MACD calculation returned NaN (insufficient warmup)", symbol)
 
     trend = "bullish" if macd_line > signal_line else "bearish"
 
@@ -349,17 +460,21 @@ def get_top_gainers_losers(count: int = 10) -> dict | None:
 
     results = []
     for symbol in NIFTY_50_SYMBOLS:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="5d")
-        if hist is None or hist.empty or len(hist) < 2:
+        hist, resolved_symbol, _err = safe_fetch_history(symbol, period="5d")
+        if hist is None or len(hist) < 2:
+            continue
+        if "Close" not in getattr(hist, "columns", []):
             continue
         latest = hist.iloc[-1]
         previous = hist.iloc[-2]
-        close = float(latest["Close"])
-        previous_close = float(previous["Close"])
+        try:
+            close = float(latest.get("Close"))
+            previous_close = float(previous.get("Close"))
+        except Exception:
+            continue
         change_percent = round((close - previous_close) / previous_close * 100, 2) if previous_close else 0
         results.append({
-            "symbol": symbol,
+            "symbol": resolved_symbol or symbol,
             "price": round(close, 2),
             "change_percent": change_percent,
         })
@@ -397,30 +512,39 @@ def calculate_moving_averages(symbol: str) -> dict | None:
             return None
         symbol = resolved
 
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="1y")
+    hist, resolved_symbol, err = safe_fetch_history(symbol, period="1y")
+    symbol = resolved_symbol or symbol
+    if hist is None:
+        return _error("market_data", err or "No market data available for symbol", symbol)
 
-    if hist is None or hist.empty:
-        return None
+    if "Close" not in getattr(hist, "columns", []):
+        return _error("market_data", "Market data missing 'Close' column.", symbol)
 
-    if len(hist) < 200:
-        return None
+    close = hist["Close"].dropna()
+    if len(close) < 200:
+        return _error("indicator", "Not enough data for indicator calculation", symbol)
 
-    close = hist["Close"]
-    sma20 = ta.sma(close, length=20)
-    sma50 = ta.sma(close, length=50)
-    sma200 = ta.sma(close, length=200)
+    try:
+        sma20 = ta.sma(close, length=20)
+        sma50 = ta.sma(close, length=50)
+        sma200 = ta.sma(close, length=200)
+    except Exception:
+        logger.error("Moving averages calculation failed: symbol=%s", symbol, exc_info=True)
+        return _error("indicator", "Moving averages calculation failed", symbol)
 
     if sma20 is None or sma50 is None or sma200 is None:
-        return None
+        return _error("indicator", "Moving averages calculation returned empty result", symbol)
 
-    latest_close = float(close.iloc[-1])
-    latest_sma20 = float(sma20.iloc[-1])
-    latest_sma50 = float(sma50.iloc[-1])
-    latest_sma200 = float(sma200.iloc[-1])
+    try:
+        latest_close = float(close.iloc[-1])
+        latest_sma20 = float(sma20.iloc[-1])
+        latest_sma50 = float(sma50.iloc[-1])
+        latest_sma200 = float(sma200.iloc[-1])
+    except Exception:
+        return _error("indicator", "Moving averages calculation returned invalid values", symbol)
 
-    if any(v != v for v in (latest_sma20, latest_sma50, latest_sma200)):
-        return None
+    if any(_is_nan(v) for v in (latest_sma20, latest_sma50, latest_sma200)):
+        return _error("indicator", "Moving averages calculation returned NaN (insufficient warmup)", symbol)
 
     def _signal(price: float, ma: float) -> str:
         return "above" if price > ma else "below"
@@ -457,33 +581,46 @@ def calculate_bollinger_bands(symbol: str) -> dict | None:
             return None
         symbol = resolved
 
-    ticker = yf.Ticker(symbol)
-    hist = ticker.history(period="60d")
+    hist, resolved_symbol, err = safe_fetch_history(symbol, period="60d")
+    symbol = resolved_symbol or symbol
+    if hist is None:
+        return _error("market_data", err or "No market data available for symbol", symbol)
 
-    if hist is None or hist.empty:
-        return None
+    if "Close" not in getattr(hist, "columns", []):
+        return _error("market_data", "Market data missing 'Close' column.", symbol)
 
-    if len(hist) < 25:
-        return None
+    close = hist["Close"].dropna()
+    if len(close) < 25:
+        return _error("indicator", "Not enough data for indicator calculation", symbol)
 
-    bbands_df = ta.bbands(hist["Close"], length=20, std=2)
+    try:
+        bbands_df = ta.bbands(close, length=20, std=2)
+    except Exception:
+        logger.error("Bollinger Bands calculation failed: symbol=%s", symbol, exc_info=True)
+        return _error("indicator", "Bollinger Bands calculation failed", symbol)
 
     if bbands_df is None or bbands_df.empty:
-        return None
+        return _error("indicator", "Bollinger Bands calculation returned empty result", symbol)
 
     cols = bbands_df.columns.tolist()
     if len(cols) < 3:
-        return None
+        return _error("indicator", "Bollinger Bands calculation returned unexpected output", symbol)
 
     latest = bbands_df.iloc[-1]
-    lower = float(latest[cols[0]])
-    middle = float(latest[cols[1]])
-    upper = float(latest[cols[2]])
+    try:
+        lower = float(latest[cols[0]])
+        middle = float(latest[cols[1]])
+        upper = float(latest[cols[2]])
+    except Exception:
+        return _error("indicator", "Bollinger Bands calculation returned invalid values", symbol)
 
-    if any(v != v for v in (lower, middle, upper)):
-        return None
+    if any(_is_nan(v) for v in (lower, middle, upper)):
+        return _error("indicator", "Bollinger Bands returned NaN (insufficient warmup)", symbol)
 
-    price = float(hist["Close"].iloc[-1])
+    try:
+        price = float(close.iloc[-1])
+    except Exception:
+        return _error("market_data", "Invalid close price data received.", symbol)
 
     if price > upper:
         signal = "overbought"

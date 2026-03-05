@@ -26,9 +26,24 @@ class PortfolioStock(BaseModel):
     buy_price: confloat(gt=0) = Field(..., description="Average buy price per share/unit.")
 
 
+def _portfolio_stocks_list_type():
+    """
+    Pydantic v1/v2 compatibility:
+    - v1: conlist(..., min_items=..., max_items=...)
+    - v2: conlist(..., min_length=..., max_length=...)
+    """
+    try:
+        return conlist(PortfolioStock, min_length=1, max_length=50)  # type: ignore[call-arg]
+    except TypeError:
+        return conlist(PortfolioStock, min_items=1, max_items=50)  # type: ignore[call-arg]
+
+
+PortfolioStocksList = _portfolio_stocks_list_type()
+
+
 class AdvisorV4Request(BaseModel):
     symbol: str = Field(..., description="Primary stock symbol to analyse.")
-    portfolio: Optional[conlist(PortfolioStock, min_items=1, max_items=50)] = Field(
+    portfolio: Optional[PortfolioStocksList] = Field(
         None,
         description="Optional portfolio context; same schema as /portfolio/analyze.",
     )
