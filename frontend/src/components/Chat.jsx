@@ -309,6 +309,17 @@ function Chat({ embedded = false, heightClassName = 'h-[480px] md:h-[560px]' }) 
     const trimmed = input.trim()
     if (!trimmed || loading) return
 
+    // UX: if user types "one more" after news/trend, infer the intent
+    const t = trimmed.toLowerCase()
+    const lastBot = [...messages].filter((m) => m.sender === 'bot').slice(-1)[0]
+    const lastText = (lastBot?.text || '').toLowerCase()
+    const inferred =
+      (t === 'one more' || t === 'more' || t === 'again' || t === 'another') && lastText.includes('headlines')
+        ? 'Show NSE news'
+        : (t === 'one more' || t === 'more' || t === 'again' || t === 'another') && lastText.includes('market trend')
+          ? 'Market trend'
+          : trimmed
+
     setInput('')
     setLoading(true)
 
@@ -324,12 +335,12 @@ function Chat({ embedded = false, heightClassName = 'h-[480px] md:h-[560px]' }) 
       const userMsgRef = push(msgsRef)
       await set(userMsgRef, {
         sender: 'user',
-        text: trimmed,
+        text: inferred,
         createdAt: serverTimestamp(),
       })
 
       // For future MCP/LLM: pass watchlist context (optional, currently ignored by backend)
-      const response = await api.post('/chat', { query: trimmed })
+      const response = await api.post('/chat', { query: inferred })
       const botText = formatBotResponse(response.data)
 
       const botMsgRef = push(msgsRef)
@@ -342,10 +353,10 @@ function Chat({ embedded = false, heightClassName = 'h-[480px] md:h-[560px]' }) 
       await update(ref(db, basePath), {
         updatedAt: serverTimestamp(),
         // Simple heuristic: title from first few words of user question
-        title: trimmed.length > 40 ? `${trimmed.slice(0, 40)}…` : trimmed,
+        title: inferred.length > 40 ? `${inferred.slice(0, 40)}…` : inferred,
       })
     } catch (error) {
-      console.error('Chat /ask error:', error)
+      console.error('Chat /chat error:', error)
       const detail =
         error.response?.data?.detail || error.message || 'Sorry, something went wrong while contacting the server.'
       if (uid && activeSessionId) {

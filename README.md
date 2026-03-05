@@ -14,7 +14,8 @@ In addition to the REST API, the project also ships a **Bharat Finance MCP serve
 - **IPO & SME tools** – Upcoming IPOs, GMP, listing performance, and SME stock analysis routes for deeper primary-market tracking.
 - **Sectors & macro** – Sector performance summaries plus repo rate, inflation, and GDP routes for macro context.
 - **Portfolio analytics (API)** – Endpoints to post a portfolio and get risk/return summaries and sector breakdowns (ready for future UI wiring).
-- **AI advisor** – Natural-language chat for stocks, SIPs, mutual funds, IPOs, and macro concepts, embedded directly into the dashboard.
+- **AI advisor** – Natural-language chat for stocks, SIPs, mutual funds, IPOs, and macro concepts, embedded directly into the dashboard. See `docs/ai_advisor.md` for V1–V5 details.
+- **Resilience predictor (ML + simulation)** – Financial shock resilience scoring with optional Gemini tips. See `docs/resilience_predictor.md`.
 - **Watchlists** – Firebase-backed stock and mutual fund watchlists with optional local-storage mirroring for a smoother UX.
 - **Chat persistence** – Messages and activity synced to Firebase Realtime Database.
 - **Indian flag theme** – Saffron, white, green, and navy blue palette tailored for Indian markets.
@@ -180,6 +181,19 @@ High‑level view of key backend routes (see `/docs` for the full OpenAPI schema
 | `/gdp`                           | GET    | India GDP growth time‑series                       |
 | `/portfolio/analyze`             | POST   | Portfolio risk/return and sector analytics         |
 | `/portfolio/summary`             | POST   | Lightweight portfolio summary                       |
+| `/predict-resilience`            | POST   | Financial shock resilience scoring (ML + simulation) |
+| `/advisor/v2/stock`              | POST   | Advisor V2: stock analytics (optional)             |
+| `/advisor/v2/portfolio`          | POST   | Advisor V2: portfolio analytics (optional)         |
+| `/advisor/v3/analyze`            | POST   | Advisor V3: reasoning + factor scoring (optional)  |
+| `/advisor/v4/quant-analysis`     | POST   | Advisor V4: quant strategies + VaR/ES (optional)   |
+| `/advisor/chat`                  | POST   | Advisor V5: conversational assistant (optional)    |
+| `/advisor/insights`              | GET    | Advisor V5: AI insights feed (optional)            |
+
+## Documentation
+
+- **AI Advisor (V1–V5)**: `docs/ai_advisor.md`
+- **Resilience Predictor**: `docs/resilience_predictor.md`
+- **MCP setup**: `docs/mcp_setup.md`
 
 ## MCP Tools Overview
 

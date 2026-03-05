@@ -26,6 +26,11 @@ from app.routes.stock_routes import macd_router
 from app.routes.stock_routes import moving_averages_router
 from app.routes.stock_routes import rsi_router
 from app.routes.stock_routes import router as stock_router
+from app.routes.advisor_v2_routes import advisor_v2_router
+from app.routes.advisor_v3_routes import advisor_v3_router
+from app.routes.advisor_v4_routes import advisor_v4_router
+from app.routes.advisor_v5_routes import advisor_v5_router
+from app.routes.advisor_v3_routes import advisor_v3_router
 from app.services.stock_search_service import initialize_stock_database
 from app.utils.response_optimizer import MAX_RESPONSE_SIZE, optimize_response
 
@@ -138,6 +143,11 @@ app.include_router(query_router)
 app.include_router(sector_router)
 app.include_router(portfolio_router)
 app.include_router(news_router)
+app.include_router(advisor_v2_router)
+app.include_router(advisor_v3_router)
+app.include_router(advisor_v4_router)
+app.include_router(advisor_v5_router)
+app.include_router(advisor_v3_router)
 
 # Resilience router: lazy-loaded. Import only when including; if it fails, other APIs unaffected.
 try:

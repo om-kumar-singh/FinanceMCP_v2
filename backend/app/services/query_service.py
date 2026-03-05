@@ -326,13 +326,19 @@ def process_query(query: str) -> dict[str, Any]:
     # MARKET NEWS
     if any(x in q for x in ("news", "nse news", "market news", "show nse", "show news", "headlines")):
         from app.services.news_service import get_market_news
+        from app.services.mock_data import sample_mock_news
 
         market = "NSE"
         if "bse" in q or "sensex" in q:
             market = "BSE"
         items = get_market_news(market)
         if not items:
-            items = [{"title": "Nifty closes higher amid banking rally", "source": "Economic Times"}]
+            mock = sample_mock_news(market=market, k=5)
+            return {
+                "query": query,
+                "result": {"news": mock["news"], "market": market, "summary": mock["summary"]},
+                "source": "market_news",
+            }
         return {
             "query": query,
             "result": {"news": items, "market": market},
