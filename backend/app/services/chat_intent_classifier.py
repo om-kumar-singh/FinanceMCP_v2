@@ -16,17 +16,37 @@ from app.services.symbol_dictionary import COMMON_COMPANY_ALIASES
 from app.services.stock_search_service import resolve_symbol
 
 
+# Priority order for intent detection (first match wins when multiple flags set)
 INTENTS: Tuple[str, ...] = (
-    "stock_analysis",
-    "technical_indicator",
+    "growth_comparison",
+    "long_term_comparison",
     "comparison",
     "portfolio_analysis",
+    "portfolio_rebalance",
+    "technical_indicator",
     "prediction",
+    "buy_decision",
     "advisor_recommendation",
+    "momentum_scan",
+    "breakout_scan",
+    "mean_reversion_scan",
+    "institutional_activity",
+    "accumulation_scan",
+    "sector_flow_scan",
+    "volume_scan",
+    "market_insights",
+    "market_risk",
+    "market_trends",
+    "ai_buy_signals",
+    "ai_sector_beneficiaries",
+    "ai_picks",
     "market_regime",
-    "volume_analysis",
+    "stock_analysis",
     "market_news",
+    "macro_query",
     "macro_economics",
+    "news_query",
+    "volume_analysis",
     "investment_advice",
 )
 
@@ -99,6 +119,7 @@ _TOKEN_STOPWORDS = {
 
 FINANCE_KEYWORDS = {
     "stock",
+    "stocks",
     "share",
     "price",
     "pe",
@@ -125,10 +146,23 @@ FINANCE_KEYWORDS = {
     "ema",
     "volume",
     "prediction",
+    "predicted",
     "forecast",
+    "expected return",
+    "expected price",
+    "predicted price",
+    "volatility",
     "optimize",
     "diversify",
     "invest",
+    "analyze",
+    "analyse",
+    "compare",
+    "regime",
+    "buy",
+    "sell",
+    "hold",
+    "recommend",
 }
 
 
@@ -206,6 +240,7 @@ def extract_symbols(query: str, *, context: Optional[Dict[str, Any]] = None) -> 
     """
     Extract and normalize symbols from query text.
     Never substitutes random tickers: if a token can't be resolved, it is dropped.
+    Returns only resolved symbols (e.g. RELIANCE.NS, TCS.NS).
     """
     ctx = context or {}
     q = (query or "").strip()
@@ -226,14 +261,33 @@ def extract_symbols(query: str, *, context: Optional[Dict[str, Any]] = None) -> 
     return out
 
 
+def get_raw_parser_symbols(query: str, *, context: Optional[Dict[str, Any]] = None) -> List[str]:
+    """
+    Return raw symbol-like tokens from the query (before resolution).
+    Used to detect when the user mentioned a symbol that could not be resolved.
+    """
+    ctx = context or {}
+    q = (query or "").strip()
+    if not q:
+        return []
+    parsed = parse_query(q, context=ctx)
+    return list(parsed.get("symbols") or [])
+
+
 def _indicator_type(query: str) -> Optional[str]:
     q = (query or "").lower()
-    if "rsi" in q:
+    # Natural-language RSI variants
+    if "overbought" in q or "oversold" in q:
         return "rsi"
-    if "macd" in q:
+    # Use word boundaries to avoid false positives (e.g. "reversion" contains "rsi")
+    if re.search(r"\brsi\b", q):
+        return "rsi"
+    if re.search(r"\bmacd\b", q):
         return "macd"
     if "moving average" in q or "moving-averages" in q or re.search(r"\bsma\b|\bema\b", q):
         return "moving_averages"
+    if re.search(r"\bbollinger\b", q):
+        return "bollinger"
     if any(w in q for w in ("technical", "indicator", "technicals")):
         return "technical"
     return None
@@ -252,49 +306,188 @@ def classify_intent(query: str, *, context: Optional[Dict[str, Any]] = None) -> 
     q = (query or "").strip()
     ql = q.lower()
 
-    syms = extract_symbols(q, context=ctx)
+    syms_all = extract_symbols(q, context=ctx)
+    # Strict symbol filtering: only keep symbols that are explicitly present in the raw query text.
+    # This avoids adding extra names from dictionaries, fuzzy matching, or search suggestions.
+    explicit_tokens = {t.upper() for t in re.findall(r"[A-Za-z]{2,10}", q)}
+
+    def _is_explicit(sym: str) -> bool:
+        base = re.sub(r"\.(NS|BO)$", "", sym or "", flags=re.IGNORECASE).upper()
+        return base in explicit_tokens
+
+    syms = [s for s in syms_all if _is_explicit(s)]
     primary = syms[0] if syms else (ctx.get("last_symbol") if isinstance(ctx.get("last_symbol"), str) else None)
 
     amount = _extract_amount_inr(q)
     ind = _indicator_type(q)
 
     # Feature flags
-    f_compare = bool(re.search(r"\b(compare|vs|versus|better)\b", ql))
+    f_compare = bool(re.search(r"\b(compare|vs|versus|better than|better)\b", ql))
     f_portfolio = ("portfolio" in ql) or ("holdings" in ql) or ("positions" in ql) or bool(re.search(r"\d+\s*%.*\d+\s*%", ql, re.S))
-    f_predict = bool(re.search(r"\b(predict|prediction|forecast|target price|price target|model)\b", ql))
-    f_buy = bool(re.search(r"\b(should i buy|buy now|sell|hold|good investment|worth buying|recommend)\b", ql))
+    f_predict = bool(
+        re.search(
+            r"\b(predict|predicted|prediction|forecast|target price|price target|model|expected return|expected price|predicted price|short term forecast|price prediction|price forecast)\b",
+            ql,
+        )
+    )
+    f_buy = bool(
+        re.search(
+            r"\b("
+            r"should i buy|"
+            r"should i invest|"
+            r"buy now|"
+            r"sell now|"
+            r"hold|"
+            r"good investment|"
+            r"is it a good investment|"
+            r"good stock to buy|"
+            r"worth buying|"
+            r"worth (buying|investing)|"
+            r"buy recommendation|"
+            r"is .+ a good (buy|investment)|"
+            r"is .+ worth (buying|investing)"
+            r")\b",
+            ql,
+        )
+    )
     f_invest_advice = bool(re.search(r"\b(which stocks|what stocks|pick stocks|choose stocks|suggest stocks|diversif)\b", ql)) and ("invest" in ql or amount is not None)
-    f_news = "news" in ql or "headlines" in ql
-    f_macro = bool(re.search(r"\b(inflation|repo|rbi|gdp|budget|rupee)\b", ql))
-    f_market_ctx = bool(re.search(r"\b(market regime|regime|bullish|bearish|sector|sectors strongest|market outlook)\b", ql))
+    f_ai_picks = bool(
+        re.search(
+            r"\b(top stocks|best forecast|highest predicted growth|strong predictions|ai picks|best predicted stocks|stocks with best forecast|top ai picks|which stocks have (highest |strong )?(predicted growth|ai predictions)|show stocks with best)\b",
+            ql,
+        )
+    )
+    f_momentum_scan = bool(re.search(r"\b(momentum|trending|strong trend|strong stocks)\b", ql))
+    f_breakout_scan = bool(re.search(r"\b(breakout|price breakout|technical breakout)\b", ql))
+    f_mean_reversion_scan = bool(re.search(r"\b(mean reversion|oversold stocks|bounce candidates)\b", ql))
+    f_institutional = bool(
+        re.search(r"\b(institutional buying|institutional selling|institutions buying|institutions selling|institutional|smart money)\b", ql)
+    )
+    f_accumulation_scan = bool(re.search(r"\b(accumulation|distribution)\b", ql))
+    f_volume_scan = bool(re.search(r"\b(unusual volume|volume spike|spike in volume)\b", ql))
+    f_sector_flow = bool(re.search(r"\b(it stocks|banking stocks|energy stocks)\b", ql)) and (
+        "institution" in ql or "smart money" in ql or "buy" in ql or "selling" in ql
+    )
+    f_market_insights = bool(re.search(r"\b(market insights|ai market insights|today's market outlook|todays market outlook|market summary)\b", ql))
+    f_market_risk = bool(re.search(r"\b(market risk|risks today|risk factors|what risks should investors watch)\b", ql))
+    f_market_trends = bool(re.search(r"\b(market trends|emerging trends|what trends are emerging|sector trends)\b", ql))
+    f_growth_cmp = bool(
+        re.search(
+            r"(growth potential|future growth|best growth stock|strong growth|growth outlook|expected return)",
+            ql,
+        )
+    ) and bool(re.search(r"\b(which|better|vs|versus|compare)\b", ql))
+    f_ai_buy_signals = bool(
+        re.search(r"\b(strong ai buy signals|ai buy signals|strong buy signals|ai buy)\b", ql)
+    )
+    f_ai_sector_beneficiaries = bool(re.search(r"\b(ai growth|ai stocks|benefit from ai)\b", ql))
+    f_long_term = bool(re.search(r"\b(long term investment|long-term investment|long term growth|long-term growth)\b", ql))
+    f_news = bool(re.search(r"\b(news|headlines|latest (market )?news)\b", ql))
+    f_macro = bool(re.search(r"\b(inflation|repo|rbi|gdp|budget|rupee|interest rate)\b", ql))
+    # Market regime is intentionally narrow and should not compete with symbol-heavy queries.
+    f_market_ctx = bool(
+        re.search(r"\b(market regime|market trend|volatility increasing)\b", ql),
+    )
     f_volume = bool(re.search(r"\b(volume|unusual volume|volume spike|institutional|smart money|accumulation|distribution)\b", ql))
     f_stock_analysis = bool(re.search(r"\b(analy[sz]e|analysis|tell me about|fundamentals|valuation|pe ratio|dividend)\b", ql))
 
-    # Scoring (0–1)
+    # Hard rule: if at least two symbols are detected and this is not a portfolio query,
+    # force a comparison-style intent so that other intents (especially market_regime) do not override.
+    if len(syms) >= 2 and not f_portfolio:
+        return ClassifiedQuery(
+            intent="comparison",
+            confidence=0.99,
+            symbols=syms,
+            primary_symbol=primary if primary else syms[0],
+            indicator_type=ind,
+            wants_amount_inr=amount,
+            debug={
+                "forced_multi_symbol_comparison": True,
+                "symbols": syms,
+            },
+        )
+
+    # Scoring: use explicit priority order
+    # 1. portfolio intents
+    # 2. comparison intents
+    # 3. buy decision
+    # 4. technical indicator queries
+    # 5. prediction / AI picks
+    # 6. market regime / insights
+    # 7. macro and other analysis
     candidates: List[Tuple[str, float]] = []
+
+    # 1) Portfolio
+    if f_portfolio:
+        if "rebalance" in ql:
+            candidates.append(("portfolio_rebalance", 0.97))
+        else:
+            candidates.append(("portfolio_analysis", 0.97))
+
+    # 2) Comparison-style intents (growth_comparison and generic comparison, long-term comparison)
+    if f_growth_cmp:
+        candidates.append(("growth_comparison", 0.96))
+    if f_compare:
+        candidates.append(("comparison", 0.95))
+    if f_long_term and len(syms) >= 2:
+        candidates.append(("long_term_comparison", 0.95))
+
+    # 3) Buy / investment advice
+    if f_buy:
+        candidates.append(("buy_decision", 0.94 if primary else 0.72))
+        candidates.append(("advisor_recommendation", 0.93 if primary else 0.70))
+        if not primary:
+            candidates.append(("investment_advice", 0.6))
     if f_invest_advice:
-        candidates.append(("investment_advice", 0.95))
+        candidates.append(("investment_advice", 0.88))
+
+    # 4) Technical indicator queries
     if ind:
         candidates.append(("technical_indicator", 0.92))
-    if f_compare:
-        candidates.append(("comparison", 0.9 if len(syms) >= 2 else 0.7))
-    if f_portfolio:
-        candidates.append(("portfolio_analysis", 0.9))
-    if f_predict:
-        candidates.append(("prediction", 0.88))
-    if f_buy:
-        candidates.append(("advisor_recommendation", 0.9 if primary else 0.65))
-        candidates.append(("investment_advice", 0.8 if not primary else 0.6))
-    if f_volume:
-        candidates.append(("volume_analysis", 0.85 if primary else 0.7))
-    if f_market_ctx:
-        candidates.append(("market_regime", 0.82))
-    if f_news:
-        candidates.append(("market_news", 0.8))
-    if f_macro:
-        candidates.append(("macro_economics", 0.78))
+    if f_momentum_scan and ("stocks" in ql or "which" in ql or "show" in ql or "scan" in ql):
+        candidates.append(("momentum_scan", 0.94))
+    if f_breakout_scan and ("stocks" in ql or "which" in ql or "show" in ql or "scan" in ql):
+        candidates.append(("breakout_scan", 0.94))
+    if f_mean_reversion_scan and ("stocks" in ql or "which" in ql or "show" in ql or "scan" in ql or "opportunit" in ql):
+        candidates.append(("mean_reversion_scan", 0.94))
+    # 5) Prediction / AI picks
+    if f_ai_picks:
+        # ai_picks (screener/ranking) beats prediction when both match (e.g. "which stocks have highest predicted growth")
+        candidates.append(("ai_picks", 0.91))
+    elif f_predict:
+        candidates.append(("prediction", 0.90))
+
+    if f_ai_buy_signals:
+        candidates.append(("ai_buy_signals", 0.90))
+    if f_ai_sector_beneficiaries:
+        candidates.append(("ai_sector_beneficiaries", 0.89))
+
+    # 6) Market regime / insights (never when symbols are present)
+    if f_market_ctx and not syms:
+        candidates.append(("market_regime", 0.88))
+    if f_market_insights:
+        candidates.append(("market_insights", 0.87))
+    if f_market_risk:
+        candidates.append(("market_risk", 0.87))
+    if f_market_trends:
+        candidates.append(("market_trends", 0.87))
+    if f_sector_flow:
+        candidates.append(("sector_flow_scan", 0.86))
+    # 7) Other analysis, news, macro, volume
     if f_stock_analysis:
-        candidates.append(("stock_analysis", 0.75 if primary else 0.55))
+        candidates.append(("stock_analysis", 0.84 if primary else 0.55))
+    if f_news:
+        candidates.append(("news_query", 0.80))
+    if f_macro:
+        candidates.append(("macro_query", 0.79))
+    if f_accumulation_scan and ("stocks" in ql or "which" in ql or "show" in ql or "scan" in ql or "pattern" in ql):
+        candidates.append(("accumulation_scan", 0.78))
+    if f_volume_scan and ("stocks" in ql or "which" in ql or "show" in ql or "scan" in ql or "today" in ql):
+        candidates.append(("volume_scan", 0.78))
+    if f_institutional and primary:
+        candidates.append(("institutional_activity", 0.77))
+    if f_volume and not (f_volume_scan or f_accumulation_scan or f_sector_flow or f_institutional):
+        candidates.append(("volume_analysis", 0.76 if primary else 0.65))
 
     # If a symbol exists but nothing else matched, default to stock_analysis.
     if not candidates and primary:

@@ -6,6 +6,7 @@ The goal is: UI never breaks, and repeated calls still look realistic.
 from __future__ import annotations
 
 import time
+from urllib.parse import quote_plus
 from typing import Any
 
 
@@ -54,7 +55,28 @@ def sample_mock_news(market: str = "NSE", k: int = 5) -> dict[str, Any]:
     # Create a rotating window based on current time
     idx = int((time.time_ns() // 1_000_000) % n)
     k = max(1, min(int(k or 5), min(8, n)))
-    news = [pool[(idx + i) % n] for i in range(k)]
+    raw_items = [pool[(idx + i) % n] for i in range(k)]
+
+    # Enrich mock items with link/url so the frontend can still navigate to a
+    # sensible destination (e.g., a search for the headline) instead of
+    # falling back to "#" which many browsers will treat as about:blank#blocked.
+    news: list[dict[str, Any]] = []
+    for item in raw_items:
+        title = item.get("title", "")
+        source = item.get("source", "Market")
+        # Simple search-based fallback URL
+        query = quote_plus(f"{title} {m} market news") if title else quote_plus(f"{m} market news")
+        link = f"https://www.google.com/search?q={query}"
+
+        news.append(
+            {
+                "title": title,
+                "source": source,
+                "publisher": source,
+                "link": link,
+                "url": link,
+            }
+        )
 
     summary = f"{m} Market Update: {news[0]['title']}" if news else f"{m} Market Update"
     return {"news": news, "summary": summary, "market": m}

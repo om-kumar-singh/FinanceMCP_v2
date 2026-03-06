@@ -265,6 +265,16 @@ def compute_multi_factor_score(
         "volatility": round(vol_adj, 3),
     }
 
+    # Growth-style composite score that can be reused for ranking candidates:
+    # 0.5 * expected_return + 0.3 * momentum_score + 0.2 * sentiment_score
+    try:
+        exp_ret = ensemble.get("expected_return")
+        exp_ret_f = float(exp_ret) if exp_ret is not None else 0.0
+    except Exception:
+        exp_ret_f = 0.0
+    growth_score = 0.5 * exp_ret_f + 0.3 * momentum_signal + 0.2 * sentiment_score
+    factor_scores["growth_score"] = round(growth_score, 3)
+
     institutional_block: Dict[str, Any] = {
         "model_prediction_breakdown": ensemble.get("models") or {},
         "factor_scores": factor_scores,

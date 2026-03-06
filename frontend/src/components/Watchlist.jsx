@@ -160,6 +160,19 @@ function Watchlist({ onSelectStock, refreshTrigger }) {
 export function useWatchlist() {
   const { user } = useAuth()
   const uid = user?.uid
+  const [watchlist, setWatchlist] = useState({})
+
+  useEffect(() => {
+    if (!uid) {
+      setWatchlist({})
+      return
+    }
+    const wlRef = ref(db, `users/${uid}/watchlist`)
+    const unsub = onValue(wlRef, (snapshot) => {
+      setWatchlist(snapshot.val() || {})
+    })
+    return () => unsub()
+  }, [uid])
 
   const addToWatchlist = (symbol, name) => {
     if (!uid || !symbol) return
@@ -175,7 +188,13 @@ export function useWatchlist() {
     remove(wlRef)
   }
 
-  return { addToWatchlist, removeFromWatchlist }
+  const isInWatchlist = (symbol) => {
+    if (!symbol) return false
+    const safeKey = symbol.replace(/\./g, '_')
+    return Boolean(watchlist?.[safeKey])
+  }
+
+  return { addToWatchlist, removeFromWatchlist, watchlist, isInWatchlist }
 }
 
 export default Watchlist

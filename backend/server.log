@@ -19,3 +19,353 @@
 2026-03-05 16:24:26,127 ERROR yfinance: $TATAMOTORS.NS: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
 2026-03-05 16:28:21,960 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
 2026-03-05 16:31:31,112 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 16:42:44,100 ERROR yfinance: HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: TATAMOTORS.NS"}}}
+2026-03-05 16:42:45,333 ERROR yfinance: $TATAMOTORS.NS: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+2026-03-05 16:58:14,967 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 17:00:03,746 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 17:01:01,958 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 17:02:01,147 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 20:27:59,846 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 20:44:29,491 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 20:45:42,801 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 20:47:28,760 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 20:51:01,996 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 20:52:22,972 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 20:52:58,204 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 20:53:24,321 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 21:28:06,941 INFO app.services.stock_search_service: NSE Stock Database loaded: 2250 stocks
+2026-03-05 21:33:07,683 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=5d interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,728 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=60d interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,738 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=1y interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,740 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=60d interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,742 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=6mo interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,840 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=5d interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,870 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=60d interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,876 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=60d interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,880 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=6mo interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-05 21:33:07,882 ERROR app.services.market_data_service: yfinance history fetch failed: symbol=RELIANCE.NS period=1y interval=None
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\market_data_service.py", line 65, in safe_fetch_history
+    else ticker.history(period=period)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\venv\Lib\site-packages\yfinance\scrapers\history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-06 09:45:10,341 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:57:54,191 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:57:59,488 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:58:11,008 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:58:16,215 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:58:21,317 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:58:42,470 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:58:54,177 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:59:01,426 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:59:17,140 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:59:24,150 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:59:32,553 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 09:59:52,594 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:00:09,534 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:00:16,921 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:00:30,271 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:08:44,607 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:08:57,895 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:09:03,060 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:09:22,324 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:09:37,103 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:09:46,500 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:09:59,724 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:10:13,474 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:10:24,285 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:10:47,428 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:11:05,932 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:11:13,812 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:11:25,687 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:11:52,213 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:12:16,308 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:13:00,985 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:13:10,135 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:13:31,803 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:13:36,816 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:27:57,983 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:28:04,658 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:28:10,074 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:28:15,290 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:28:49,526 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:29:23,259 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:29:30,889 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:29:42,772 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:29:47,984 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:29:52,921 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:30:11,272 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:30:30,349 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:48:10,266 ERROR yfinance: HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: TATAMOTORS.NS"}}}
+2026-03-06 10:48:10,866 ERROR yfinance: $TATAMOTORS.NS: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+2026-03-06 10:52:15,254 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:52:43,913 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:53:20,080 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:53:35,076 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:53:44,498 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:54:00,310 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:54:11,322 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:54:18,463 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:54:36,458 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:54:54,486 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:55:30,602 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:55:37,548 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:55:44,289 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:55:50,657 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:55:56,758 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:56:03,582 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:56:13,892 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:56:20,990 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:56:27,644 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:56:38,466 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:56:55,148 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:56:59,982 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:57:03,928 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:57:08,710 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:57:12,743 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:57:40,227 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 10:57:50,752 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:09:31,146 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:09:38,245 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:09:46,716 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:10:07,131 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:10:12,095 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:13:04,823 ERROR yfinance: HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: TATAMOTORS.NS"}}}
+2026-03-06 11:13:05,278 ERROR yfinance: $TATAMOTORS.NS: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+2026-03-06 11:23:30,888 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:23:47,402 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:29:41,370 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:29:53,967 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 11:30:12,108 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:09:57,883 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:13:14,048 ERROR yfinance: HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: TATAMOTORS.NS"}}}
+2026-03-06 12:13:14,515 ERROR yfinance: $TATAMOTORS.NS: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+2026-03-06 12:18:38,765 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:19:03,390 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:19:14,410 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:20:27,039 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:29:44,936 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:30:08,866 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:32:31,879 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:32:54,847 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:33:25,765 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:42:32,483 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:42:50,965 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 12:43:25,090 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 13:37:19,926 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 13:51:57,353 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 13:52:47,999 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 13:53:50,627 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 13:54:05,137 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 13:54:56,380 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 13:55:56,164 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 16:46:53,863 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 16:52:20,090 ERROR yfinance: HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: TATAMOTORS.NS"}}}
+2026-03-06 16:52:20,808 ERROR yfinance: $TATAMOTORS.NS: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+2026-03-06 16:56:34,950 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 16:56:56,478 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:00:36,068 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:00:48,085 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:01:02,380 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:01:45,866 ERROR app.routes.query_routes: Chat API failed
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\routes\query_routes.py", line 54, in chat
+    payload, updates = await handle_chat_query(body.query, context=ctx)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\chat_advisor_service.py", line 926, in handle_chat_query
+    multi = await _multi_comparison_result(resolved_syms)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\chat_advisor_service.py", line 456, in _multi_comparison_result
+    if largest_mc_idx is None or mc > _float_or_none(rows[largest_mc_idx].get("marketCap")):
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: '>' not supported between instances of 'float' and 'NoneType'
+2026-03-06 17:02:15,461 ERROR yfinance: HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: TATAMOTORS.NS"}}}
+2026-03-06 17:02:16,171 ERROR yfinance: $TATAMOTORS.NS: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+2026-03-06 17:05:44,359 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:06:19,729 ERROR app.routes.query_routes: Chat API failed
+Traceback (most recent call last):
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\routes\query_routes.py", line 54, in chat
+    payload, updates = await handle_chat_query(body.query, context=ctx)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\chat_advisor_service.py", line 926, in handle_chat_query
+    multi = await _multi_comparison_result(resolved_syms)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\OM KUMAR SINGH\Desktop\Capstone Project\bharat-finance-ai\backend\app\services\chat_advisor_service.py", line 456, in _multi_comparison_result
+    if largest_mc_idx is None or mc > _float_or_none(rows[largest_mc_idx].get("marketCap")):
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: '>' not supported between instances of 'float' and 'NoneType'
+2026-03-06 17:09:02,890 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:09:30,797 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:13:12,109 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:13:27,221 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:21:48,379 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:22:03,751 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:26:11,889 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:30:13,515 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:30:36,689 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks
+2026-03-06 17:30:50,342 INFO app.services.stock_search_service: NSE Stock Database loaded: 2249 stocks

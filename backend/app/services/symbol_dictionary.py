@@ -25,6 +25,7 @@ COMMON_COMPANY_ALIASES: dict[str, str] = {
     "itc": "ITC.NS",
     "wipro": "WIPRO.NS",
     "bharti airtel": "BHARTIARTL.NS",
+    "bharti": "BHARTIARTL.NS",
     "airtel": "BHARTIARTL.NS",
     "kotak bank": "KOTAKBANK.NS",
     "kotak": "KOTAKBANK.NS",

@@ -104,11 +104,14 @@ def _extract_symbols(text: str) -> List[str]:
         "ANALYSE",
         "ANALYSIS",
         "PREDICT",
+        "PREDICTED",
         "PREDICTION",
+        "EXPECTED",
         "FORECAST",
         "MODEL",
         "TARGET",
         "PRICE",
+        "VOLATILITY",
         "STOCK",
         "STOCKS",
         "VOLUME",
@@ -167,6 +170,7 @@ def parse_query(query: str, *, context: Optional[Dict[str, Any]] = None) -> Dict
     }
     """
     ctx = context or {}
+    # Normalize to lowercase for intent matching so all phrase checks are case-insensitive
     q = (query or "").strip()
     q_lower = q.lower()
 
@@ -182,6 +186,17 @@ def parse_query(query: str, *, context: Optional[Dict[str, Any]] = None) -> Dict
     wants_portfolio = False
     wants_market_outlook = False
     wants_top_picks = False
+    indicator_type: Optional[str] = None
+
+    # Technical indicator hints
+    if "overbought" in q_lower or "oversold" in q_lower or "rsi" in q_lower:
+        indicator_type = "rsi"
+    elif "macd" in q_lower:
+        indicator_type = "macd"
+    elif "moving average" in q_lower or "moving-averages" in q_lower or re.search(r"\bsma\b|\bema\b", q_lower):
+        indicator_type = "moving_averages"
+    elif "bollinger" in q_lower:
+        indicator_type = "bollinger"
 
     if any(w in q_lower for w in ("portfolio", "my holdings", "my stocks", "my positions")):
         wants_portfolio = True
@@ -194,7 +209,10 @@ def parse_query(query: str, *, context: Optional[Dict[str, Any]] = None) -> Dict
         else:
             intent = "portfolio_overview"
             analysis_type = "portfolio_overview"
-    elif any(w in q_lower for w in ("market regime", "market outlook", "macro view", "bullish", "bearish")):
+    elif indicator_type or any(w in q_lower for w in ("technical", "indicator", "technicals")):
+        intent = "technical_indicator"
+        analysis_type = "technical_indicator"
+    elif any(w in q_lower for w in ("market regime", "market outlook", "macro view", "bullish", "bearish", "what is the market regime")):
         intent = "market_outlook"
         analysis_type = "market_regime"
         wants_market_outlook = True
@@ -202,10 +220,10 @@ def parse_query(query: str, *, context: Optional[Dict[str, Any]] = None) -> Dict
         intent = "top_picks"
         analysis_type = "stock_screen"
         wants_top_picks = True
-    elif any(w in q_lower for w in ("compare", "better than", "vs ", "versus")) and (primary_symbol or prev_symbol):
+    elif any(w in q_lower for w in ("compare", "better than", "vs ", "versus")) and (primary_symbol or prev_symbol or len(symbols) >= 2):
         intent = "stock_comparison"
         analysis_type = "stock_comparison"
-    elif any(w in q_lower for w in ("buy", "sell", "hold", "should i", "is now a good time")):
+    elif any(w in q_lower for w in ("buy", "sell", "hold", "should i", "is now a good time", "good investment", "worth buying", "recommend")):
         intent = "stock_recommendation"
         analysis_type = "stock_analysis"
     elif any(w in q_lower for w in ("momentum", "strong momentum", "trend", "breakout")):
@@ -226,6 +244,7 @@ def parse_query(query: str, *, context: Optional[Dict[str, Any]] = None) -> Dict
         "analysis_type": analysis_type,
         "symbols": symbols,
         "primary_symbol": primary_symbol,
+        "indicator_type": indicator_type,
         "wants_portfolio": wants_portfolio,
         "wants_market_outlook": wants_market_outlook,
         "wants_top_picks": wants_top_picks,

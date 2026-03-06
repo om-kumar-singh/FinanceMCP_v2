@@ -224,45 +224,62 @@ function MarketNews() {
         )}
 
         {!loading &&
-          news.map((item, idx) => (
-            <article
-              key={`${item.url || item.title || idx}`}
-              className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg p-3 hover:border-bharat-navy/50 hover:shadow-md transition-all"
-            >
-              {item.urlToImage ? (
-                <div className="w-10 h-10 rounded-md overflow-hidden bg-slate-100 shrink-0">
-                  <img
-                    src={item.urlToImage}
-                    alt={item.title}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              ) : (
-                <div className="w-10 h-10 rounded-md bg-bharat-navy/5 flex items-center justify-center shrink-0">
-                  <span className="text-[10px] text-bharat-navy font-semibold">BF</span>
-                </div>
-              )}
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => handleClickArticle(item)}
-                className="flex-1 min-w-0"
+          news.map((item, idx) => {
+            const rawUrl = item.url || ''
+            const safeUrl =
+              rawUrl && /^https?:\/\//i.test(rawUrl)
+                ? rawUrl
+                : rawUrl
+                ? `https://${rawUrl.replace(/^\/+/, '')}`
+                : ''
+
+            const hasRealLink = Boolean(safeUrl && safeUrl !== '#')
+
+            return (
+              <article
+                key={`${item.url || item.title || idx}`}
+                className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg p-3 hover:border-bharat-navy/50 hover:shadow-md transition-all"
               >
-                <h4 className="text-xs font-semibold text-slate-900 leading-snug line-clamp-3">
-                  {item.title}
-                </h4>
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-bharat-green/10 text-[10px] font-semibold text-bharat-green border border-bharat-green/40">
-                    {item.publisher || 'Market Desk'}
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    {item.publishedAt ? timeAgo(item.publishedAt) : ''}
-                  </span>
-                </div>
-              </a>
-            </article>
-          ))}
+                {item.urlToImage ? (
+                  <div className="w-10 h-10 rounded-md overflow-hidden bg-slate-100 shrink-0">
+                    <img
+                      src={item.urlToImage}
+                      alt={item.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-10 h-10 rounded-md bg-bharat-navy/5 flex items-center justify-center shrink-0">
+                    <span className="text-[10px] text-bharat-navy font-semibold">BF</span>
+                  </div>
+                )}
+                <a
+                  href={hasRealLink ? safeUrl : undefined}
+                  target={hasRealLink ? '_blank' : undefined}
+                  rel={hasRealLink ? 'noopener noreferrer' : undefined}
+                  onClick={(e) => {
+                    if (!hasRealLink) {
+                      e.preventDefault()
+                    }
+                    handleClickArticle(item)
+                  }}
+                  className="flex-1 min-w-0"
+                >
+                  <h4 className="text-xs font-semibold text-slate-900 leading-snug line-clamp-3">
+                    {item.title}
+                  </h4>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-bharat-green/10 text-[10px] font-semibold text-bharat-green border border-bharat-green/40">
+                      {item.publisher || 'Market Desk'}
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      {item.publishedAt ? timeAgo(item.publishedAt) : ''}
+                    </span>
+                  </div>
+                </a>
+              </article>
+            )
+          })}
       </div>
 
       <div className="px-4 py-3 border-t border-slate-200 bg-slate-50">

@@ -42,6 +42,7 @@ const Auth: FC = () => {
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -157,14 +158,61 @@ const Auth: FC = () => {
 
             <div>
               <label className="block text-xs font-medium text-bharat-navy mb-1.5">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border-2 border-bharat-navy/60 bg-white px-3 py-2 text-sm shadow-sm focus:border-bharat-navy focus:ring-1 focus:ring-bharat-navy outline-none"
-                placeholder="Minimum 6 characters"
-                autoComplete={isLogin ? 'current-password' : 'new-password'}
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-lg border-2 border-bharat-navy/60 bg-white px-3 py-2 pr-10 text-sm shadow-sm focus:border-bharat-navy focus:ring-1 focus:ring-bharat-navy outline-none"
+                  placeholder="Minimum 6 characters"
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 px-3 text-slate-500 hover:text-bharat-navy"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? (
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M3 3l18 18"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M10.58 10.58A2 2 0 0012 14a2 2 0 001.42-.58"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9.88 5.09A10.94 10.94 0 0112 5c5 0 9.27 3.11 11 7-1.03 2.33-2.74 4.27-4.85 5.5M6.11 6.11C4.04 7.35 2.4 9.27 1 12c1.73 3.89 6 7 11 7 1.02 0 2-.13 2.93-.38"
+                      />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 15a3 3 0 100-6 3 3 0 000 6z"
+                      />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
 
             <button

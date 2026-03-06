@@ -1,65 +1,470 @@
-# BharatFinanceAI
+# FinanceMCP – AI Financial Intelligence Platform
 
-A premium Indian fintech-style full-stack application for **Indian Markets Intelligence**. Built with FastAPI, React, Firebase Auth, and Realtime Database.
+FinanceMCP is an end‑to‑end **AI financial intelligence platform** that combines:
 
-In addition to the REST API, the project also ships a **Bharat Finance MCP server** (`BharatFinanceMCP_v1`) that exposes curated tools for mutual funds, IPOs, macroeconomic indicators, and Indian tax calculation to AI-native clients.
+- **AI stock advisor**
+- **financial resilience predictor**
+- **portfolio analysis and optimization**
+- **market regime detection**
+- **AI‑driven stock forecasting**
 
-## Features
+The system merges ideas from **machine learning**, **quantitative finance**, **technical analysis**, and **macro indicators** into a unified AI assistant for Indian markets.
 
-- **Authentication** – Firebase Auth (email/password) with protected routes and user-specific data (watchlists, activity).
-- **Unified dashboard** – Tabbed interface for **Market View**, **Technical Analysis**, **Mutual Funds**, and **AI Advisor**.
-- **Market overview (stocks)** – Search NSE symbols, view live price/volume/day range from yfinance, and add ideas to a synced equities watchlist.
-- **Technical lab** – Backend-calculated RSI and MACD with visual gauges and numeric breakdowns to spot overbought/oversold and momentum shifts.
-- **Mutual funds & SIP** – Search schemes via `mfapi.in`, view latest NAV and daily change, run SIP projections, and maintain a mutual fund watchlist.
-- **IPO & SME tools** – Upcoming IPOs, GMP, listing performance, and SME stock analysis routes for deeper primary-market tracking.
-- **Sectors & macro** – Sector performance summaries plus repo rate, inflation, and GDP routes for macro context.
-- **Portfolio analytics (API)** – Endpoints to post a portfolio and get risk/return summaries and sector breakdowns (ready for future UI wiring).
-- **AI advisor** – Natural-language chat for stocks, SIPs, mutual funds, IPOs, and macro concepts, embedded directly into the dashboard. See `docs/ai_advisor.md` for V1–V5 details.
-- **Resilience predictor (ML + simulation)** – Financial shock resilience scoring with optional Gemini tips. See `docs/resilience_predictor.md`.
-- **Watchlists** – Firebase-backed stock and mutual fund watchlists with optional local-storage mirroring for a smoother UX.
-- **Chat persistence** – Messages and activity synced to Firebase Realtime Database.
-- **Indian flag theme** – Saffron, white, green, and navy blue palette tailored for Indian markets.
-- **MCP tools (CLI / AI clients)** – Standalone MCP server exposing mutual fund, IPO, macro, and capital-gains tools with built-in **adaptive truncation** to keep AI responses within context limits.
+The same backend powers:
+
+- A React dashboard for human users.
+- Programmatic APIs for developers and quants.
+- An AI‑native MCP server that exposes tools to language models.
+
+---
+
+## Core Features
+
+### AI Stock Advisor
+
+Conversational AI that answers real‑world investment questions such as:
+
+- **“Should I buy this stock?”**
+- **“Give me a fundamentals view on TCS.”**
+- **“What do RSI and MACD say about INFY?”**
+- **“What’s the AI‑predicted return for RELIANCE?”**
+- **“What is the current market regime?”**
+- **“How should I rebalance my portfolio?”**
+
+Under the hood, the advisor:
+
+- Parses natural‑language queries into structured intents.
+- Fetches live market data and technical indicators.
+- Runs ensemble prediction models and quant screens.
+- Generates human‑readable, risk‑aware explanations.
+
+See `docs/AI_ADVISOR.md` for a deep dive into the advisor architecture.
+
+---
+
+### Financial Resilience Predictor
+
+The **financial resilience predictor** estimates how well a person can handle financial shocks (job loss, market crashes, emergencies).
+
+- **Inputs** typically include:
+  - income
+  - savings and liquid assets
+  - recurring expenses
+  - debt and EMIs
+  - employment stability / sector risk
+- **Output**:
+  - a **financial resilience score** (0–100)
+  - qualitative risk band (e.g. strong / moderate / vulnerable)
+  - runway in months and scenario‑specific adjustments
+
+This module uses ML models, Monte Carlo simulation, and macro stress signals to summarize a household’s shock‑absorbing capacity.
+
+See `docs/RESILIENCE_PREDICTOR.md` for full details.
+
+---
+
+### AI Prediction Engine
+
+The prediction engine forecasts **short‑term stock movements** using an ensemble of models:
+
+- Uses:
+  - price momentum signals
+  - technical indicators (RSI, MACD, moving averages)
+  - volatility modeling and regime adjustments
+- Outputs:
+  - **expected return** (as a fraction or %)
+  - **predicted price** for a selected horizon
+  - **confidence score/label**
+
+These predictions are surfaced via:
+
+- Advisor endpoints (`/advisor/v2`, `/advisor/v3`, `/advisor/v4`).
+- The conversational AI advisor (Advisor V5) for “What does AI predict for X?” queries.
+
+---
+
+### Portfolio Intelligence
+
+Portfolio analytics modules provide:
+
+- **Risk analysis** – volatility, drawdown, concentration, beta‑like metrics.
+- **Diversification scoring** – sector/stock concentration and Herfindahl‑style indices.
+- **Allocation analysis** – sector and asset‑class level splits.
+- **Optimization** – Markowitz‑style approximations to suggest more balanced allocations.
+
+These capabilities feed into both:
+
+- REST APIs for portfolio dashboards.
+- The AI advisor’s **“analyze my portfolio”** and **“how should I rebalance?”** intents.
+
+---
+
+### Market Regime Detection
+
+Market regime engines classify the current state of the index (e.g. NIFTY) as:
+
+- **bullish**
+- **bearish**
+- **sideways / range‑bound**
+
+using:
+
+- trend strength
+- volatility levels
+- recent index returns
+
+The regime is used to:
+
+- Provide standalone market context (“What is the market regime?”).
+- Adjust portfolio and position‑sizing suggestions inside the AI advisor.
+
+---
+
+## Tech Stack
+
+### Frontend
+
+- **React + Vite** – modern SPA architecture.
+- TailwindCSS and custom components for charts, watchlists, and the chat UI.
+
+### Backend
+
+- **FastAPI** – high‑performance Python API server.
+- Layered services in `backend/app/services` for data, analytics, and AI.
+
+### ML / Quant
+
+- **Python** (NumPy, pandas, scikit‑learn, etc.).
+- Custom models and heuristics for:
+  - ensemble price prediction
+  - volatility modeling
+  - portfolio risk scoring
+  - financial resilience estimation.
+
+### Market Data
+
+- **yfinance** – quotes, historical OHLCV, and basic fundamentals.
+- Additional HTTP APIs for mutual funds, macro data, and news when configured.
+
+### Visualization
+
+- Charting libraries on the frontend (e.g. candlesticks, line charts, gauges).
+- Textual summaries and tabular views in the AI advisor responses.
+
+---
+
+## System Architecture
+
+The AI advisor stack is organized into **layers**, each with a focused responsibility.
+
+### Layer 1 – Query Router & Intent Parser
+
+- Parses the user’s natural‑language query.
+- Extracts:
+  - primary intent (e.g. prediction, comparison, portfolio analysis)
+  - entities (stock symbols, sectors, time horizons)
+  - additional constraints (risk appetite, long‑term vs short‑term, etc.).
+- Routes to one or more downstream engines:
+  - prediction
+  - technicals
+  - quant models
+  - portfolio analytics
+  - resilience predictor.
+
+### Layer 2 – Market Data Engine
+
+- Fetches:
+  - current prices
+  - OHLCV history
+  - sector and index data
+  - news headlines.
+- Normalizes data into a consistent internal structure reused across advisor versions.
+
+### Layer 3 – Technical Indicator Engine
+
+- Computes:
+  - RSI
+  - MACD and signal line
+  - simple / exponential moving averages (SMA20, SMA50, SMA200, etc.)
+  - momentum and overbought/oversold flags.
+- Exposes outputs to both REST APIs and higher‑level advisor modules.
+
+### Layer 4 – Prediction Engine
+
+- Ensemble models ingest:
+  - recent price history
+  - volatility estimates
+  - technical indicators and simple features.
+- Produces:
+  - expected return
+  - predicted price for each horizon
+  - confidence score / label.
+
+### Layer 5 – Advisor Reasoning Engine
+
+- Combines signals from:
+  - prediction engine
+  - technical indicators
+  - market regime detector
+  - news sentiment
+  - portfolio risk modules.
+- Produces:
+  - multi‑factor stock scores
+  - explanations and rationales
+  - recommendations tagged with risk and confidence.
+
+### Layer 6 – Response Generator
+
+- Converts structured analysis into **human‑readable** responses:
+  - formatted text
+  - sections (Summary, Interpretation, Risk, Conclusion)
+  - comparison tables for multi‑stock queries.
+- Guarantees that chat responses are **never raw JSON**, making them suitable for both humans and AI tools.
+
+---
 
 ## Project Structure
 
-```
+High‑level layout:
+
+```text
 bharat-finance-ai/
 ├── backend/
 │   ├── main.py
 │   ├── mcp_server.py
-│   ├── requirements.txt
 │   └── app/
-│       ├── routes/          # stock, rsi, macd, query, IPO, MF, macro, sector, portfolio
-│       ├── services/
+│       ├── routes/          # API endpoints (stocks, technicals, portfolio, advisor, resilience, etc.)
+│       ├── services/        # Core business and analytics logic
 │       ├── utils/
 │       └── models/
 ├── src/
-│   ├── server.py            # BharatFinanceMCP_v1 FastMCP server (tools over stdio)
-│   ├── tools/
-│   │   ├── mutual_funds.py  # NAV lookup, MF search, SIP calculator
-│   │   ├── ipo.py           # Upcoming IPOs, GMP, subscription
-│   │   ├── macro.py         # RBI rates, inflation (World Bank), GDP, FX reserves
-│   │   └── calculators.py   # Indian capital-gains / tax estimator
-│   └── utils/
-│       └── optimizer.py     # Adaptive truncation for MCP tool payloads
+│   ├── server.py            # Finance MCP server (tools over stdio)
+│   ├── tools/               # Mutual funds, IPO, macro, tax tools
+│   └── utils/               # MCP payload optimizer
 ├── frontend/
 │   ├── src/
-│   │   ├── components/      # Navbar, Chat, StockSearch, Watchlist, RSIGauge, MACDGauge, etc.
-│   │   ├── pages/           # Landing, Dashboard, Auth
-│   │   ├── context/         # AuthContext
-│   │   ├── lib/             # firebase.ts
-│   │   ├── services/        # api.js
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   ├── package.json
-│   └── tailwind.config.js
-├── docs/
-├── claude_config.json
-├── render.yaml
-├── render_mcp.yaml
+│   │   ├── components/      # Chat, charts, watchlists, dashboards
+│   │   ├── pages/           # Dashboard, Resilience Predictor, etc.
+│   │   ├── context/
+│   │   ├── lib/
+│   │   └── services/
+│   └── package.json
+├── docs/                    # Technical documentation (AI advisor, resilience predictor, MCP, ...)
 └── README.md
 ```
+
+### Key advisor/quant modules
+
+- `backend/app/routes`
+  - API endpoints for stocks, technical indicators, portfolio, advisor, and resilience.
+- `backend/app/services`
+  - **advisor_v2** – prediction engine and signal scoring.
+  - **advisor_v3** – reasoning engine.
+  - **advisor_v4** – quant engine (regime detection, strategies, risk).
+  - **advisor_v5** – chat interface, intent parsing, and response generation.
+- `frontend`
+  - React UI, including the AI Advisor chat and Resilience Predictor screens.
+- `docs`
+  - `AI_ADVISOR.md` – detailed advisor architecture.
+  - `RESILIENCE_PREDICTOR.md` – resilience prediction system.
+
+---
+
+## External APIs and Data Sources
+
+The platform is designed to reuse existing, battle‑tested data sources:
+
+- **yfinance**
+  - Stock quotes, OHLCV history.
+  - Basic fundamentals (PE, dividend yield, sector, market cap).
+  - Index and sector data.
+- **Mutual fund APIs** (e.g. `mfapi.in`)
+  - NAV history and scheme metadata for Indian mutual funds.
+- **Macro indicators**
+  - GDP growth (e.g. World Bank).
+  - Inflation / CPI series.
+  - RBI repo rate and other policy rates.
+- **Market news APIs** (optional)
+  - For simple sentiment and macro stress heuristics.
+
+The specific configuration of keys and endpoints is environment‑driven; see environment configuration files for details.
+
+---
+
+## Algorithms and Indicators
+
+Key financial and ML/quant building blocks used in the system include:
+
+- **RSI (Relative Strength Index)**
+- **MACD (Moving Average Convergence Divergence) and signal line**
+- **Moving averages**
+  - SMA20
+  - SMA50
+  - SMA200
+- **Momentum indicators**
+- **Ensemble prediction models**
+- **Volatility estimation**
+  - standard deviation of log returns
+  - regime‑aware heuristics.
+- **Portfolio risk scoring**
+  - diversification and concentration measures
+  - simple VaR/ES‑style metrics in quant modules.
+
+---
+
+## Mathematical Formulas (Core)
+
+### Relative Strength Index (RSI)
+
+\[
+RSI = 100 - \left( \frac{100}{1 + RS} \right)
+\]
+
+where:
+
+\[
+RS = \frac{\text{average gain}}{\text{average loss}}
+\]
+
+over a chosen look‑back period (commonly 14 days).
+
+---
+
+### MACD (Moving Average Convergence Divergence)
+
+\[
+MACD = EMA_{12} - EMA_{26}
+\]
+
+with:
+
+- \( EMA_{12} \): 12‑period exponential moving average.
+- \( EMA_{26} \): 26‑period exponential moving average.
+
+Signal line:
+
+\[
+\text{Signal} = EMA_9(MACD)
+\]
+
+Histogram:
+
+\[
+\text{Histogram} = MACD - \text{Signal}
+\]
+
+---
+
+### Expected Return
+
+For a single forecast horizon:
+
+\[
+\text{Expected Return} = \frac{\text{Predicted Price} - \text{Current Price}}{\text{Current Price}}
+\]
+
+This is typically expressed as a percentage in the advisor responses.
+
+---
+
+### Volatility
+
+Volatility is approximated as the **standard deviation of log returns**:
+
+\[
+r_t = \ln\left(\frac{P_t}{P_{t-1}}\right)
+\]
+\[
+\sigma = \sqrt{\frac{1}{N-1}\sum_{t=1}^{N} (r_t - \bar{r})^2}
+\]
+
+where:
+
+- \( P_t \) is the price at time \( t \).
+- \( r_t \) is the log return.
+- \( \sigma \) is the volatility estimate.
+
+---
+
+### Z‑score (Volume analysis)
+
+Used in unusual‑volume / smart‑money style scans:
+
+\[
+Z = \frac{\text{Current Volume} - \text{Mean Volume}}{\text{Standard Deviation of Volume}}
+\]
+
+Higher positive \( Z \) suggests unusually high volume; low or negative values suggest normal or weak participation.
+
+---
+
+## What Makes This Project Unique
+
+Compared with tools like **Yahoo Finance**, **TradingView**, or generic **ChatGPT financial plug‑ins**, this project is designed as a **modular AI financial platform**:
+
+- **AI conversational advisor**
+  - Domain‑aware intent parsing and symbol resolution.
+  - Multi‑layer reasoning with predictions, technicals, and regime context.
+- **Quant‑based predictions**
+  - Ensemble forecasts instead of single black‑box outputs.
+  - Rich factor breakdowns for transparency.
+- **Portfolio intelligence**
+  - Risk and diversification analytics.
+  - Example optimizations and rebalancing hints.
+- **Market regime detection**
+  - Explicit bull/bear/sideways classification.
+  - Integration into position sizing and risk commentary.
+- **ML resilience prediction**
+  - Household‑level financial resilience, not just asset‑level risk.
+- **Modular AI architecture**
+  - Advisor V2–V5 are composable, making it easy to extend or swap models without breaking the frontend.
+
+The result is a stack that is suitable both for **end‑users** (via the dashboard) and **AI agents** (via MCP tools and structured APIs).
+
+---
+
+## Future Improvements
+
+Some directions for extending FinanceMCP:
+
+- **Real‑time market data feeds**
+  - WebSocket quotes and order‑book snapshots.
+  - Intraday regime and microstructure‑aware indicators.
+- **Deep learning models**
+  - LSTM / Transformer models for sequence prediction.
+  - Hybrid models combining fundamentals and price action.
+- **Enhanced institutional flow detection**
+  - More granular volume‑profile analysis.
+  - Cross‑asset and derivatives‑driven flow heuristics.
+- **Risk‑adjusted portfolio optimization**
+  - Sharpe, Sortino, and drawdown‑aware optimizers.
+  - Multi‑objective optimization (return, risk, diversification).
+- **Richer explanation layers**
+  - Counterfactual “what‑if” analysis for portfolios.
+  - Scenario‑based narratives (e.g. rate‑hike shocks, sector rotations).
+
+---
+
+## Getting Started (Quick)
+
+1. **Backend**
+   - `cd backend`
+   - `python -m venv venv && venv\Scripts\activate` (Windows) or `source venv/bin/activate` (Unix)
+   - `pip install -r requirements.txt`
+   - `uvicorn main:app --host 127.0.0.1 --port 8000`
+2. **Frontend**
+   - `cd frontend`
+   - `npm install`
+   - `npm run dev`
+3. Open the app in your browser and explore:
+   - AI Advisor chat.
+   - Technical analysis tools.
+   - Portfolio and resilience modules.
+
+For deeper internals, start with:
+
+- `docs/AI_ADVISOR.md`
+- `docs/RESILIENCE_PREDICTOR.md`
 
 ## Setup
 
@@ -144,13 +549,6 @@ Configure Firebase in `frontend/src/lib/firebase.ts` with your project config. E
     }
   }
   ```
-
-## Demo
-
-A short video walkthrough of BharatFinanceAI is available:
-
-- **Local recording path (for reference):** `C:\\Users\\OM KUMAR SINGH\\Videos\\Captures\\BharatFinanceAI - Google Chrome 2026-03-03 12-15-27.mp4`
-- After uploading this video to GitHub (e.g. in `docs/demo/` or as a release asset), update this section with a public link so others can view it directly from the README.
 
 ## API Overview
 

@@ -34,7 +34,7 @@ function Dashboard() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('market')
   const [toast, setToast] = useState(location.state?.toast || null)
-  const { addToWatchlist } = useWatchlist()
+  const { addToWatchlist, isInWatchlist } = useWatchlist()
 
   const [selectedSymbol, setSelectedSymbol] = useState('RELIANCE.NS')
   const [selectedMfFund, setSelectedMfFund] = useState(null)
@@ -50,6 +50,7 @@ function Dashboard() {
   const [rsiError, setRsiError] = useState(null)
   const [macdError, setMacdError] = useState(null)
   const [watchlistRefresh, setWatchlistRefresh] = useState(0)
+  const [optimisticAdded, setOptimisticAdded] = useState(false)
 
   useEffect(() => {
     const nextToast = location.state?.toast
@@ -153,6 +154,7 @@ function Dashboard() {
 
   useEffect(() => {
     fetchStockData(selectedSymbol)
+    setOptimisticAdded(false)
   }, [selectedSymbol])
 
   const handleStockSelect = (stock) => {
@@ -164,9 +166,14 @@ function Dashboard() {
 
   const handleAddToWatchlist = () => {
     if (!selectedSymbol) return
+    const already = Boolean(isInWatchlist?.(selectedSymbol))
+    if (already || optimisticAdded) return
     addToWatchlist(selectedSymbol, selectedName)
+    setOptimisticAdded(true)
     setWatchlistRefresh((v) => v + 1)
   }
+
+  const isAddedToWatchlist = optimisticAdded || Boolean(isInWatchlist?.(selectedSymbol))
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -226,17 +233,33 @@ function Dashboard() {
                 <button
                   type="button"
                   onClick={handleAddToWatchlist}
-                  className="p-2 rounded-full text-bharat-saffron hover:bg-bharat-saffron/10 transition-colors"
-                  title="Add to watchlist"
+                  disabled={isAddedToWatchlist}
+                  className={`p-2 rounded-full transition-colors ${
+                    isAddedToWatchlist
+                      ? 'text-bharat-green bg-bharat-green/10 cursor-not-allowed'
+                      : 'text-bharat-saffron hover:bg-bharat-saffron/10'
+                  }`}
+                  title={isAddedToWatchlist ? 'Added to watchlist' : 'Add to watchlist'}
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.174c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.952 9.394c-.783-.57-.38-1.81.588-1.81h4.174a1 1 0 00.95-.69l1.286-3.967z"
-                    />
-                  </svg>
+                  {isAddedToWatchlist ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.967a1 1 0 00.95.69h4.174c.969 0 1.371 1.24.588 1.81l-3.378 2.455a1 1 0 00-.364 1.118l1.287 3.966c.3.922-.755 1.688-1.54 1.118l-3.378-2.454a1 1 0 00-1.175 0l-3.378 2.454c-.784.57-1.838-.196-1.539-1.118l1.287-3.966a1 1 0 00-.364-1.118L2.952 9.394c-.783-.57-.38-1.81.588-1.81h4.174a1 1 0 00.95-.69l1.286-3.967z"
+                      />
+                    </svg>
+                  )}
                 </button>
               </div>
 
