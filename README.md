@@ -16,6 +16,8 @@ The same backend powers:
 - Programmatic APIs for developers and quants.
 - An AI‑native MCP server that exposes tools to language models.
 
+Live demo: https://bharatfinancemcp.netlify.app/
+
 ---
 
 ## Core Features
