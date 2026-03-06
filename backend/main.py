@@ -153,9 +153,16 @@ _default_origins = [
 _cors_origins = os.getenv("CORS_ORIGINS", "").strip()
 origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] or _default_origins
 
+# Optionally allow Vercel/Netlify preview URLs (e.g. *.vercel.app, *.netlify.app) via regex.
+_allow_preview = (os.getenv("ALLOW_PREVIEW_ORIGINS", "true") or "true").lower() == "true"
+_preview_origin_regex = (
+    r"https://.*\.(vercel\.app|netlify\.app)" if _allow_preview else None
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=_preview_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
