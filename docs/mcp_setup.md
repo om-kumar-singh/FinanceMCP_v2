@@ -65,6 +65,29 @@ Click it to see available BharatFinanceMCP tools.
 - "Show me IT sector performance"
 - "Analyze my portfolio: 10 shares of Reliance at ₹2000, 5 shares of TCS at ₹3500"
 
+## Cross-Market Tools Added in V2
+
+New tools added to BharatFinanceMCP_v1:
+
+### get_cross_market_signals
+
+- Returns live data for 5 macro signals
+- Tickers: ^TNX, CL=F, USDINR=X, GC=F, ^INDIAVIX
+- Fields: `current_value`, `previous_value`, `change_pct`, `direction`
+- Cached: 60s TTL
+
+### get_cross_market_analysis
+
+- Returns signals + causal insights combined
+- Includes `data_timestamp` in IST
+- Endpoint: GET `/cross-market/analysis`
+
+### interpret_causality
+
+- Rule-based causality engine
+- 5 rules: bond yield, crude, USD/INR, VIX, gold
+- Returns: `signal_name`, `impact`, `affected_sectors`, `severity` (low/medium/high)
+
 ## Troubleshooting
 
 - If tools are not showing: check that the `python` path and project path in the config are correct.

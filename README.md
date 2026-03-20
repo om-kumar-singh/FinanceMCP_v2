@@ -101,6 +101,10 @@ These capabilities feed into both:
 
 ---
 
+### Cross-Market Causality Engine
+
+- **Cross-Market Causality Engine** – Live macro signal tracking (bond yields, crude oil, USD/INR, gold, India VIX) with rule-based causal inference connecting macro events to sector impacts. See `docs/cross_market_causality.md`.
+
 ### Market Regime Detection
 
 Market regime engines classify the current state of the index (e.g. NIFTY) as:
@@ -258,17 +262,25 @@ bharat-finance-ai/
 ### Key advisor/quant modules
 
 - `backend/app/routes`
-  - API endpoints for stocks, technical indicators, portfolio, advisor, and resilience.
+  - API endpoints for stocks, technical indicators, portfolio, advisor, resilience, and cross-market.
 - `backend/app/services`
   - **advisor_v2** – prediction engine and signal scoring.
   - **advisor_v3** – reasoning engine.
   - **advisor_v4** – quant engine (regime detection, strategies, risk).
   - **advisor_v5** – chat interface, intent parsing, and response generation.
+  - **cross_market_service.py** – live macro signal fetcher.
+  - **causality_engine.py** – rule-based causal inference.
+- `backend/app/utils`
+  - **cache.py** – TTL in-memory cache.
+  - **yfinance_wrapper.py** – cached yfinance wrapper.
 - `frontend`
-  - React UI, including the AI Advisor chat and Resilience Predictor screens.
+  - React UI, including the AI Advisor chat, Resilience Predictor screens, and CrossMarketPanel.
+- `frontend/src/components`
+  - **CrossMarketPanel.jsx** – macro intelligence dashboard.
 - `docs`
   - `AI_ADVISOR.md` – detailed advisor architecture.
   - `RESILIENCE_PREDICTOR.md` – resilience prediction system.
+  - `cross_market_causality.md` – causality engine documentation.
 
 ---
 
@@ -588,11 +600,14 @@ High‑level view of key backend routes (see `/docs` for the full OpenAPI schema
 | `/advisor/v4/quant-analysis`     | POST   | Advisor V4: quant strategies + VaR/ES (optional)   |
 | `/advisor/chat`                  | POST   | Advisor V5: conversational assistant (optional)    |
 | `/advisor/insights`              | GET    | Advisor V5: AI insights feed (optional)            |
+| `/cross-market/signals`         | GET    | Live macro signals                                 |
+| `/cross-market/analysis`        | GET    | Signals + causal insights                          |
 
 ## Documentation
 
-- **AI Advisor (V1–V5)**: `docs/ai_advisor.md`
-- **Resilience Predictor**: `docs/resilience_predictor.md`
+- **AI Advisor (V1–V6)**: `docs/AI_ADVISOR.md`
+- **Cross-Market Causality Engine**: `docs/cross_market_causality.md`
+- **Resilience Predictor**: `docs/RESILIENCE_PREDICTOR.md`
 - **MCP setup**: `docs/mcp_setup.md`
 
 ## MCP Tools Overview

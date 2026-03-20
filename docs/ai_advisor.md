@@ -330,3 +330,134 @@ For a question like:
 - It supports both **single‑stock** and **multi‑stock** workflows, plus **portfolio** and **market‑level** questions.
 - The design is intentionally **modular**, so models and heuristics can evolve without breaking the external API or chat experience.
 
+---
+
+## V6: Cross-Market Aware Advisor
+
+### Overview
+
+V6 enhances the advisor with live macro signal awareness. All responses now include a macro overlay using real-time data fetched from yfinance. Bond yields, crude oil, USD/INR, gold, and India VIX are tracked and injected into stock, portfolio, and macro responses.
+
+### New Intent Types Added
+
+- **Macro Signal Analysis** – Questions about bond yield, VIX, crude oil, gold, USD/INR with a standard formatted response
+- **Cross-market impact** – How macro events affect Indian equities
+- **Portfolio analysis with macro overlay** – Portfolio risk analysis combined with live macro risk overlay
+- **Commodity comparison** – Gold, silver, oil, etc. in multi-asset comparisons
+
+### Standard Response Formats
+
+#### MACRO SIGNAL ANALYSIS
+
+**Fields:** Signal, Current Value, Today Change, What This Means, Impact on Indian Markets, Current Context, Data as of
+
+**Example:**
+```text
+**MACRO SIGNAL ANALYSIS**
+
+**Signal:** India VIX
+**Current Value:** 18.91
+**Today Change:** -19.07% (down)
+
+**What This Means:**
+India VIX measures expected market volatility over the next 30 days. At 18.91 and falling sharply by 19%, market fear has significantly reduced today. A VIX below 20 is generally considered a calm zone.
+
+**Impact on Indian Markets:**
+Low and falling VIX is positive for equities broadly. Banking and large-cap stocks typically benefit most in low-VIX environments.
+
+**Current Context:**
+Combined with gold up 2.81%, markets are sending mixed signals. Exercise moderate caution.
+
+**Data as of:** 10/03/2026, 05:46:26 PM IST
+```
+
+#### STOCK ANALYSIS
+
+**Fields:** Decision, Confidence, Current Price, Fundamentals (P/E, Sector, Dividend), Technical Signals (Momentum, Prediction, Market Regime), Macro Overlay (Live), Conclusion, Risk Note
+
+**Example:**
+```text
+**STOCK ANALYSIS: RELIANCE**
+
+**Decision:** BUY
+**Confidence:** 65%
+**Current Price:** Rs.1,408.00
+
+**Fundamentals:**
+• P/E Ratio: 22.5 (Sector avg: ~18.0)
+• Sector: Energy
+• Dividend: 0.25%
+
+**Technical Signals:**
+• Momentum: 62/100
+• Prediction: 58/100
+• Market Regime: bullish
+
+**Macro Overlay (Live):**
+• Bond Yield 4.25 (+0.50%) — valuation pressure
+• USD/INR 83.50 (+0.20%) — mixed
+• India VIX 18.91 (-19.07%) — low fear
+
+**Conclusion:**
+[Combined technical + macro reasoning.]
+
+**Risk Note:** Use this as decision support only.
+```
+
+#### PORTFOLIO ANALYSIS
+
+**Fields:** Holdings (table with Stock, Price, Weight, Sector), Sector Breakdown, Macro Risk Overlay (Live), Risk Assessment (Diversification, Concentration, Macro Exposure), Recommendations, Risk Note
+
+**Example:**
+```text
+**PORTFOLIO ANALYSIS**
+
+**Holdings:**
+| Stock    | Price    | Weight | Sector           |
+|----------|----------|--------|------------------|
+| RELIANCE | Rs.1408  | 40%    | Energy           |
+| TCS      | Rs.2513  | 30%    | Technology       |
+| HDFCBANK | Rs.849   | 30%    | Financial Svcs   |
+
+**Sector Breakdown:**
+• Energy: 40%
+• Technology: 30%
+• Financial Svcs: 30%
+
+**Macro Risk Overlay (Live):**
+• Crude Oil 72.50 (+1.2%): Rising oil increases input costs for energy holdings.
+• Bond Yield 4.25 (+0.50%): Higher yields pressure tech holdings.
+• India VIX 18.91 (-19.07%): Low VIX supports equities.
+
+**Risk Assessment:**
+• Diversification: Moderate
+• Concentration: RELIANCE at 40%
+• Macro Exposure: Medium risk
+
+**Recommendations:**
+[Actionable suggestions based on portfolio and live macro signals.]
+
+**Risk Note:** Not personalised financial advice.
+```
+
+### Intent Priority Order
+
+1. **Priority 1** – Portfolio weights detected (e.g. "Reliance 40% TCS 30%") → Portfolio Analysis with macro overlay
+2. **Priority 2** – 2+ stock names + compare/vs → Comparison Table
+3. **Priority 3** – Macro keywords (bond, yield, vix, gold, crude, rupee, INR) → Macro Signal Analysis
+4. **Priority 4** – Single stock + buy/hold/sell → Stock Analysis with macro overlay
+5. **Priority 5** – Everything else → Clarification menu fallback
+
+### Timeout & Performance
+
+- **Parallel signal fetching** – 6s timeout for cross-market signals
+- **TTL cache** – 60s for prices, 300s for info
+- **Frontend timeout** – 30s via axios default
+- **Fallback responses** – If fetch fails, responses degrade gracefully without crashing
+
+### Timestamp
+
+All timestamps are shown in **IST (UTC+5:30)**:
+
+`DD/MM/YYYY, HH:MM:SS AM/PM IST`
+

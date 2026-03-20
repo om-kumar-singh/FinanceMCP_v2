@@ -7,7 +7,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import List, Dict, Any
 
-import yfinance as yf
+from app.utils.yfinance_wrapper import fetch_news
 import time as _time
 
 
@@ -60,8 +60,7 @@ def get_market_news(ticker: str) -> List[Dict[str, Any]]:
   """
   symbol = _normalize_ticker(ticker)
   try:
-      stock = yf.Ticker(symbol)
-      raw_news = getattr(stock, "news", None) or []
+      raw_news = fetch_news(symbol, ttl=300)
   except Exception:
       return []
 

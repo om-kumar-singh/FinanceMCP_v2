@@ -8,7 +8,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 60000, // Resilience predictor can take 30+ seconds (ML, Monte Carlo, yfinance)
+  timeout: 30000, // 30 seconds for all requests (backend uses cached yfinance)
 })
 
 export const searchStocks = async (query, limit = 8, signal) => {

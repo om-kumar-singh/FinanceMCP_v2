@@ -9,7 +9,8 @@ import { useAuth } from '../context/AuthContext'
 function formatBotResponse(response) {
   if (!response) return 'Sorry, I did not get a response.'
 
-  if (response.message && !response.result) {
+  // Prefer pre-formatted message (standard macro/portfolio/stock analysis blocks)
+  if (response.message && (!response.result || response.message.startsWith('**'))) {
     return response.message
   }
 
@@ -162,6 +163,58 @@ function formatBotResponse(response) {
   }
 
   if (source === 'macro') {
+    // New cross-market macro shape: result.signals + causal_insights
+    if (result && result.signals) {
+      const { signals, causal_insights, data_timestamp } = result
+
+      const describe = (label, key) => {
+        const s = signals?.[key]
+        if (!s || typeof s !== 'object') {
+          return `${label} data is currently unavailable.`
+        }
+        const current = Number.isFinite(Number(s.current_value)) ? Number(s.current_value) : null
+        const pct = Number.isFinite(Number(s.change_pct)) ? Number(s.change_pct) : null
+        const dir = s.direction || (pct != null && pct !== 0 ? (pct > 0 ? 'up' : 'down') : 'flat')
+        if (current == null || pct == null) {
+          return `${label} data is currently unavailable.`
+        }
+        const pctAbs = Math.abs(pct).toFixed(2)
+        return `${label} is currently at ${current.toFixed(2)}, ${dir} ${pctAbs}% today.`
+      }
+
+      const lines = []
+      lines.push('Here is the current cross-market macro backdrop:')
+      lines.push(describe('US 10Y bond yield', 'us_10y_yield'))
+      lines.push(describe('Crude oil (WTI)', 'wti_crude'))
+      lines.push(describe('USD/INR', 'usd_inr'))
+      lines.push(describe('Gold', 'gold'))
+      lines.push(describe('India VIX', 'india_vix'))
+
+      if (Array.isArray(causal_insights) && causal_insights.length > 0) {
+        lines.push('')
+        lines.push('How this typically affects Indian equities:')
+        causal_insights.forEach((ins) => {
+          const impact = ins.impact || 'Macro signal detected.'
+          const severity = ins.severity || 'low'
+          const sectors = Array.isArray(ins.affected_sectors) ? ins.affected_sectors.join(', ') : 'various sectors'
+          lines.push(`- ${impact} (severity: ${severity}, sectors most affected: ${sectors}).`)
+        })
+      }
+
+      if (data_timestamp) {
+        try {
+          const local = new Date(data_timestamp).toLocaleString()
+          lines.push('')
+          lines.push(`Data snapshot time: ${local}`)
+        } catch {
+          // ignore formatting errors
+        }
+      }
+
+      return lines.join('\n')
+    }
+
+    // Legacy macro shapes (inflation / GDP / repo)
     if (Array.isArray(result) && result[0]?.inflation !== undefined) {
       const lines = result
         .slice(0, 3)
@@ -357,8 +410,12 @@ function Chat({ embedded = false, heightClassName = 'h-[480px] md:h-[560px]' }) 
       })
     } catch (error) {
       console.error('Chat /chat error:', error)
-      const detail =
-        error.response?.data?.detail || error.message || 'Sorry, something went wrong while contacting the server.'
+      const isTimeout =
+        error?.code === 'ECONNABORTED' ||
+        String(error?.message || '').toLowerCase().includes('timeout')
+      const detail = isTimeout
+        ? 'Market data is taking longer than usual to load. Please try your question again.'
+        : error.response?.data?.detail || error.message || 'Sorry, something went wrong while contacting the server.'
       if (uid && activeSessionId) {
         const msgsRef = ref(db, `users/${uid}/chats/${activeSessionId}/messages`)
         const errRef = push(msgsRef)
@@ -596,7 +653,7 @@ function Chat({ embedded = false, heightClassName = 'h-[480px] md:h-[560px]' }) 
               </div>
               {loading && (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-bharat-navy">Typing</span>
+                  <span className="text-xs text-bharat-navy">Analyzing macro signals and market data...</span>
                   <span className="flex gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-bharat-navy animate-bounce [animation-delay:-0.2s]" />
                     <span className="w-1.5 h-1.5 rounded-full bg-bharat-navy animate-bounce [animation-delay:-0.1s]" />
@@ -652,21 +709,24 @@ function Chat({ embedded = false, heightClassName = 'h-[480px] md:h-[560px]' }) 
                                 <ol className="list-decimal pl-5 mb-1 last:mb-0" {...props} />
                               ),
                               table: ({ node, ...props }) => (
-                                <div className="overflow-x-auto">
+                                <div className="overflow-x-auto my-4">
                                   <table
-                                    className="min-w-full text-xs border border-slate-200 mb-1"
+                                    className="w-full border-collapse text-sm border border-gray-700 [&_tbody_tr:nth-child(even)]:bg-[rgba(255,255,255,0.03)] [&_tbody_tr:hover]:bg-[rgba(255,153,51,0.08)]"
                                     {...props}
                                   />
                                 </div>
                               ),
                               th: ({ node, ...props }) => (
                                 <th
-                                  className="border border-slate-200 px-2 py-1 bg-slate-50 text-left"
+                                  className="bg-[#0D1B3E] text-[#FF9933] px-4 py-2 text-left border border-gray-700 text-xs font-semibold"
                                   {...props}
                                 />
                               ),
                               td: ({ node, ...props }) => (
-                                <td className="border border-slate-200 px-2 py-1" {...props} />
+                                <td
+                                  className="px-4 py-2 border border-gray-700 text-slate-900 text-xs bg-white"
+                                  {...props}
+                                />
                               ),
                             }}
                           >
@@ -716,7 +776,7 @@ function Chat({ embedded = false, heightClassName = 'h-[480px] md:h-[560px]' }) 
               {loading && (
                 <div className="flex justify-start">
                   <div className="bg-white text-bharat-navy border-2 border-bharat-navy rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm flex items-center gap-2">
-                    <span>Thinking with FinanceMCP</span>
+                    <span>Analyzing macro signals and market data...</span>
                     <span className="flex gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-bharat-navy animate-bounce [animation-delay:-0.2s]" />
                       <span className="w-1.5 h-1.5 rounded-full bg-bharat-navy animate-bounce [animation-delay:-0.1s]" />

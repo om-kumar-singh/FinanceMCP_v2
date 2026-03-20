@@ -8,8 +8,9 @@ from datetime import datetime
 from typing import Any
 
 import requests
-import yfinance as yf
 from bs4 import BeautifulSoup
+
+from app.utils.yfinance_wrapper import fetch_history, fetch_info
 
 IPO_LIST_URL = os.getenv(
     "IPO_LIST_URL",
@@ -98,7 +99,8 @@ def _extract_ipo_from_detail_page(url: str, name: str) -> dict[str, str] | None:
             fmt = "%a, %b %d, %Y"
             open_dt = datetime.strptime(open_date, fmt).date()
             close_dt = datetime.strptime(close_date, fmt).date()
-            today = datetime.utcnow().date()
+            from app.utils.datetime_utils import get_ist_now
+            today = get_ist_now().date()
             if today < open_dt:
                 subscription_status = "upcoming"
             elif open_dt <= today <= close_dt:
@@ -288,10 +290,8 @@ def get_sme_stock_analysis(symbol: str) -> dict[str, Any] | None:
 
     symbol = str(symbol).strip().upper()
 
-    ticker = yf.Ticker(symbol)
-
     try:
-        hist = ticker.history(period="1y")
+        hist = fetch_history(symbol, period="1y", ttl=600)
     except Exception:
         return None
 
@@ -319,11 +319,7 @@ def get_sme_stock_analysis(symbol: str) -> dict[str, Any] | None:
     avg_volume = float(hist["Volume"].mean()) if "Volume" in hist else 0.0
     today_volume = float(latest["Volume"]) if "Volume" in latest else 0.0
 
-    info: dict[str, Any] = {}
-    try:
-        info = ticker.info or {}
-    except Exception:
-        info = {}
+    info: dict[str, Any] = fetch_info(symbol, ttl=600) or {}
 
     market_cap = info.get("marketCap") or info.get("market_cap") or 0
     company_name = info.get("longName") or info.get("shortName") or symbol

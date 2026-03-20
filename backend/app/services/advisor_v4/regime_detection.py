@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import yfinance as yf
-
 
 def detect_market_regime(index_symbol: str = "^NSEI") -> Dict[str, Any]:
     """
@@ -33,8 +31,9 @@ def detect_market_regime(index_symbol: str = "^NSEI") -> Dict[str, Any]:
     }
     """
     try:
-        ticker = yf.Ticker(index_symbol)
-        hist = ticker.history(period="6mo")
+        from app.utils.yfinance_wrapper import fetch_history
+
+        hist = fetch_history(index_symbol, period="6mo", ttl=60)
     except Exception:
         return {
             "market_regime": "sideways_market",

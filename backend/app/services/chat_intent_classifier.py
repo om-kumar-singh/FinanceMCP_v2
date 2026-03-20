@@ -45,6 +45,8 @@ INTENTS: Tuple[str, ...] = (
     "market_news",
     "macro_query",
     "macro_economics",
+    "macro_analysis",
+    "cross_market_impact",
     "news_query",
     "volume_analysis",
     "investment_advice",
@@ -298,6 +300,35 @@ def has_finance_signal(query: str) -> bool:
     return any(k in q for k in FINANCE_KEYWORDS)
 
 
+HYPOTHETICAL_MACRO_PHRASES = (
+    "why would",
+    "why does",
+    "why is",
+    "what if",
+    "if gold",
+    "if oil",
+    "if yields",
+    "if bond",
+    "if rupee",
+    "if vix",
+    "when oil",
+    "when gold",
+    "when yields",
+    "when bond",
+    "when rupee",
+    "suppose ",
+    "assuming ",
+    "hypothetically",
+    "in case ",
+)
+
+
+def is_hypothetical_macro_query(query: str) -> bool:
+    """If True, route to macro analysis and NEVER to portfolio."""
+    ql = (query or "").lower()
+    return any(phrase in ql for phrase in HYPOTHETICAL_MACRO_PHRASES)
+
+
 def classify_intent(query: str, *, context: Optional[Dict[str, Any]] = None) -> ClassifiedQuery:
     """
     Classify query into one of the supported intents with a confidence score.
@@ -323,7 +354,8 @@ def classify_intent(query: str, *, context: Optional[Dict[str, Any]] = None) -> 
 
     # Feature flags
     f_compare = bool(re.search(r"\b(compare|vs|versus|better than|better)\b", ql))
-    f_portfolio = ("portfolio" in ql) or ("holdings" in ql) or ("positions" in ql) or bool(re.search(r"\d+\s*%.*\d+\s*%", ql, re.S))
+    f_portfolio_raw = ("portfolio" in ql) or ("holdings" in ql) or ("positions" in ql) or bool(re.search(r"\d+\s*%.*\d+\s*%", ql, re.S))
+    f_portfolio = f_portfolio_raw and not is_hypothetical_macro_query(q)
     f_predict = bool(
         re.search(
             r"\b(predict|predicted|prediction|forecast|target price|price target|model|expected return|expected price|predicted price|short term forecast|price prediction|price forecast)\b",
@@ -383,7 +415,24 @@ def classify_intent(query: str, *, context: Optional[Dict[str, Any]] = None) -> 
     f_ai_sector_beneficiaries = bool(re.search(r"\b(ai growth|ai stocks|benefit from ai)\b", ql))
     f_long_term = bool(re.search(r"\b(long term investment|long-term investment|long term growth|long-term growth)\b", ql))
     f_news = bool(re.search(r"\b(news|headlines|latest (market )?news)\b", ql))
-    f_macro = bool(re.search(r"\b(inflation|repo|rbi|gdp|budget|rupee|interest rate)\b", ql))
+    f_macro = bool(re.search(r"\b(inflation|repo|rbi|gdp|budget|rupee|interest rate|macro)\b", ql))
+    f_macro_signals = bool(
+        re.search(
+            r"\b(macro signals?|cross[- ]market|cross[- ]?asset|bond yield|bond yields|10y|10-year|10 yr|us 10y|treasury yield|"
+            r"crude oil|brent|wti|oil price|oil prices?|usd\/inr|usd inr|currency rate|fx rate|forex|"
+            r"gold price|gold rally|gold\b|india vix|vix)\b",
+            ql,
+        )
+    )
+    # "What happens when X" / "why would X be a warning" / "impact of X on Y" — route to macro
+    f_macro_what_happens = bool(
+        re.search(
+            r"\b(what happens (to \w+ )?when |what happens when |how does .+ affect |"
+            r"why would .+ be a warning|why does .+ (affect|mean)|why is .+ (a warning|important)|"
+            r"impact of .+ on |effect of .+ on )",
+            ql,
+        )
+    ) and (f_macro_signals or f_macro)
     # Market regime is intentionally narrow and should not compete with symbol-heavy queries.
     f_market_ctx = bool(
         re.search(r"\b(market regime|market trend|volatility increasing)\b", ql),
@@ -391,9 +440,16 @@ def classify_intent(query: str, *, context: Optional[Dict[str, Any]] = None) -> 
     f_volume = bool(re.search(r"\b(volume|unusual volume|volume spike|institutional|smart money|accumulation|distribution)\b", ql))
     f_stock_analysis = bool(re.search(r"\b(analy[sz]e|analysis|tell me about|fundamentals|valuation|pe ratio|dividend)\b", ql))
 
-    # Hard rule: if at least two symbols are detected and this is not a portfolio query,
-    # force a comparison-style intent so that other intents (especially market_regime) do not override.
-    if len(syms) >= 2 and not f_portfolio:
+    # Educational macro-style questions: why / how / what does / what if about macro concepts
+    # "why would", "why does", "why is" must NEVER route to portfolio prompt
+    f_edu_macro = bool(
+        (f_macro or f_macro_signals or f_macro_what_happens)
+        and re.search(r"\b(why would|why does|why is|why |how |what does|what if|what would)\b", ql)
+    )
+
+    # Hard rule (narrowed): force comparison ONLY when user explicitly asks to compare
+    # and there are no buy/recommend/worth style intent words.
+    if len(syms) >= 2 and not f_portfolio and f_compare and not f_buy:
         return ClassifiedQuery(
             intent="comparison",
             confidence=0.99,
@@ -407,7 +463,32 @@ def classify_intent(query: str, *, context: Optional[Dict[str, Any]] = None) -> 
             },
         )
 
-    # Scoring: use explicit priority order
+    # Strict priority routing for macro & educational queries BEFORE generic scoring:
+    # 1) "What happens when X" / "why would X" / "impact of X on Y" — always macro
+    # 2) If message contains explicit macro signal keywords and is not a buy/portfolio weights query,
+    #    treat as cross-market impact.
+    if (f_macro_signals or f_macro or f_macro_what_happens) and not f_portfolio and not f_buy:
+        if f_edu_macro:
+            return ClassifiedQuery(
+                intent="macro_analysis",
+                confidence=0.99,
+                symbols=syms,
+                primary_symbol=primary if primary else (syms[0] if syms else None),
+                indicator_type=ind,
+                wants_amount_inr=amount,
+                debug={"forced_macro_intent": "macro_analysis"},
+            )
+        return ClassifiedQuery(
+            intent="cross_market_impact",
+            confidence=0.99,
+            symbols=syms,
+            primary_symbol=primary if primary else (syms[0] if syms else None),
+            indicator_type=ind,
+            wants_amount_inr=amount,
+            debug={"forced_macro_intent": "cross_market_impact"},
+        )
+
+    # Scoring: use explicit priority order for remaining intents
     # 1. portfolio intents
     # 2. comparison intents
     # 3. buy decision
@@ -480,6 +561,10 @@ def classify_intent(query: str, *, context: Optional[Dict[str, Any]] = None) -> 
         candidates.append(("news_query", 0.80))
     if f_macro:
         candidates.append(("macro_query", 0.79))
+    if f_macro_signals:
+        # Treat explicit macro-signal questions as dedicated intents so they do not fall back to clarification.
+        candidates.append(("cross_market_impact", 0.90))
+        candidates.append(("macro_analysis", 0.88))
     if f_accumulation_scan and ("stocks" in ql or "which" in ql or "show" in ql or "scan" in ql or "pattern" in ql):
         candidates.append(("accumulation_scan", 0.78))
     if f_volume_scan and ("stocks" in ql or "which" in ql or "show" in ql or "scan" in ql or "today" in ql):

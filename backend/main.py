@@ -16,6 +16,7 @@ from app.routes.compare_routes import compare_router
 from app.routes.history_routes import history_router
 from app.routes.ipo_routes import ipo_router
 from app.routes.macro_routes import macro_router
+from app.routes.cross_market import cross_market_router
 from app.routes.mutual_fund_routes import mutual_fund_router
 from app.routes.portfolio_routes import portfolio_router
 from app.routes.news_routes import news_router
@@ -194,6 +195,7 @@ app.include_router(bollinger_router)
 app.include_router(mutual_fund_router)
 app.include_router(ipo_router)
 app.include_router(macro_router)
+app.include_router(cross_market_router)
 app.include_router(query_router)
 app.include_router(sector_router)
 app.include_router(portfolio_router)

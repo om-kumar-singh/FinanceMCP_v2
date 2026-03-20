@@ -8,6 +8,7 @@ import yfinance as yf
 
 from app.services.sector_service import SECTOR_STOCKS
 from app.utils.rate_limiter import rate_limit
+from app.utils.yfinance_wrapper import fetch_history
 
 
 def _find_sector_for_symbol(symbol: str) -> str:
@@ -77,8 +78,7 @@ def analyze_portfolio(stocks: List[Dict[str, Any]]) -> Dict[str, Any]:
                         if prev:
                             day_change_percent = (last - prev) / prev * 100
                 if current_price is None:
-                    ticker = yf.Ticker(symbol)
-                    hist_fallback = ticker.history(period="2d")
+                    hist_fallback = fetch_history(symbol, period="2d", ttl=60)
                     if hist_fallback is not None and not hist_fallback.empty and len(hist_fallback) >= 2:
                         last_row = hist_fallback.iloc[-1]
                         prev_row = hist_fallback.iloc[-2]

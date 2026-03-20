@@ -10,10 +10,10 @@ import os
 from typing import Any, Dict, Optional, Tuple
 
 import requests
-import yfinance as yf
 
 from app.services.news_service import get_market_news
 from app.services.recommender_service import generate_resilience_recommendations
+from app.utils.yfinance_wrapper import fetch_history
 
 
 def _get_ml_prediction(features: list[float]) -> Optional[float]:
@@ -54,8 +54,7 @@ def _get_stock_daily_returns_volatility(symbols: list[str], days: int = 35) -> O
     volatilities: list[float] = []
     for symbol in symbols[:5]:
         try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period=f"{days}d")
+            hist = fetch_history(symbol, period=f"{days}d", ttl=60)
         except Exception:
             continue
         if hist is None or hist.empty or len(hist) < 5:

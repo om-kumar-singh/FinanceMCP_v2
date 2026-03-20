@@ -4,10 +4,9 @@ Sector performance service using yfinance.
 
 from typing import Any
 
-import yfinance as yf
-
 from app.utils.cache import cacheable
 from app.utils.rate_limiter import rate_limit
+from app.utils.yfinance_wrapper import fetch_history
 
 
 SECTOR_STOCKS: dict[str, list[str]] = {
@@ -118,8 +117,7 @@ def get_sector_performance(sector_name: str) -> dict[str, Any]:
 
     for symbol in symbols:
         try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="5d")
+            hist = fetch_history(symbol, period="5d", ttl=60)
         except Exception:
             continue
 

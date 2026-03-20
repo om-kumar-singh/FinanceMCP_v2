@@ -21,11 +21,15 @@ import MarketNews from '../components/MarketNews'
 import MutualFundSearch from '../components/MutualFundSearch'
 import MutualFundSipCalculator from '../components/MutualFundSipCalculator'
 import MutualFundWatchlist from '../components/MutualFundWatchlist'
+import CrossMarketPanel from "../components/CrossMarketPanel";
 
 const TABS = [
   { id: 'market', label: 'Market View' },
   { id: 'technical', label: 'Technical Analysis' },
   { id: 'mutual', label: 'Mutual Funds' },
+  /* TEMPORARILY HIDDEN - Macro Intelligence
+  { id: 'macro', label: 'Macro Intelligence' },
+  */
   { id: 'ai', label: 'AI Advisor' },
 ]
 
@@ -446,6 +450,10 @@ function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* TEMPORARILY HIDDEN - Macro Intelligence Panel
+      {activeTab === 'macro' && <CrossMarketPanel />}
+      */}
 
       {activeTab === 'mutual' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">

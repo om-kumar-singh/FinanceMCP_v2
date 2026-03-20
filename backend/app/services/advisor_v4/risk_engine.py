@@ -42,13 +42,12 @@ def _portfolio_return_series(weights: Dict[str, float], period: str = "1y") -> n
 
 def _index_series(index_symbol: str = "^NSEI", period: str = "1y") -> np.ndarray:
     try:
-        import yfinance as yf
+        from app.utils.yfinance_wrapper import fetch_history
     except Exception:
         return np.array([], dtype=float)
 
     try:
-        ticker = yf.Ticker(index_symbol)
-        hist = ticker.history(period=period)
+        hist = fetch_history(index_symbol, period=period, ttl=60)
     except Exception:
         return np.array([], dtype=float)
 

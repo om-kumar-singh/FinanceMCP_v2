@@ -16,8 +16,8 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import anyio
-
-from app.services.chat_intent_classifier import classify_intent, get_raw_parser_symbols, has_finance_signal
+from app.services.chat_intent_classifier import classify_intent, get_raw_parser_symbols, has_finance_signal, is_hypothetical_macro_query
+from app.utils.yfinance_wrapper import fetch_history, fetch_info
 from app.services.mock_data import sample_mock_news
 from app.services.news_service import get_market_news
 from app.services.stock_search_service import resolve_symbol
@@ -28,6 +28,365 @@ from app.services.advisor_v5.response_generator import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+COMMODITY_MAP: Dict[str, str] = {
+    "crude oil": "CL=F",
+    "natural gas": "NG=F",
+    "crude": "CL=F",
+    "oil": "CL=F",
+    "wti": "CL=F",
+    "brent": "BZ=F",
+    "gold": "GC=F",
+    "silver": "SI=F",
+    "copper": "HG=F",
+    "platinum": "PL=F",
+    "aluminium": "ALI=F",
+    "aluminum": "ALI=F",
+    "wheat": "ZW=F",
+    "corn": "ZC=F",
+    "bitcoin": "BTC-USD",
+    "btc": "BTC-USD",
+    "ethereum": "ETH-USD",
+    "eth": "ETH-USD",
+}
+
+_COMMODITY_TICKERS = set(COMMODITY_MAP.values())
+
+
+_COMMON_COMPARE_ALIASES: Dict[str, str] = {
+    "tcs": "TCS.NS",
+    "reliance": "RELIANCE.NS",
+    "infy": "INFY.NS",
+    "infosys": "INFY.NS",
+    "hdfc": "HDFCBANK.NS",
+    "hdfcbank": "HDFCBANK.NS",
+    "wipro": "WIPRO.NS",
+    "hcl": "HCLTECH.NS",
+    "hcltech": "HCLTECH.NS",
+    "icici": "ICICIBANK.NS",
+    "icicibank": "ICICIBANK.NS",
+    "sbi": "SBIN.NS",
+    "bajaj": "BAJFINANCE.NS",
+    "bajajfinance": "BAJFINANCE.NS",
+    "axis": "AXISBANK.NS",
+    "axisbank": "AXISBANK.NS",
+    "kotak": "KOTAKBANK.NS",
+    "ongc": "ONGC.NS",
+    "tatamotors": "TATAMOTORS.NS",
+    "tata": "TATAMOTORS.NS",
+    "maruti": "MARUTI.NS",
+    "adani": "ADANIENT.NS",
+    "sunpharma": "SUNPHARMA.NS",
+    "sun": "SUNPHARMA.NS",
+    "ltim": "LTIM.NS",
+    "ltimindtree": "LTIM.NS",
+    "nifty": "^NSEI",
+    "sensex": "^BSESN",
+}
+
+_COMPARE_STOPWORDS = {
+    "compare",
+    "vs",
+    "versus",
+    "vc",
+    "v/s",
+    "v",
+    "vd",
+    "and",
+    "with",
+    "between",
+    "or",
+    "please",
+    "me",
+    "the",
+    "stocks",
+    "stock",
+}
+
+
+def get_stock_metrics(ticker_symbol):
+    try:
+        # --- HISTORY (most reliable source) ---
+        # Call history BEFORE info to avoid session issues
+        try:
+            hist = fetch_history(ticker_symbol, period="1y", ttl=60)
+        except Exception:
+            hist = None
+
+        price = None
+        today_change = "N/A"
+        today_change_float = None
+        fifty_two_high = "N/A"
+        fifty_two_low = "N/A"
+        fifty_two_high_val = None
+        fifty_two_low_val = None
+
+        if hist is not None and not hist.empty:
+            # Price — from last close
+            price = round(float(hist["Close"].iloc[-1]), 2)
+
+            # Today change — last 2 closing prices
+            if len(hist) >= 2:
+                prev = float(hist["Close"].iloc[-2])
+                curr = float(hist["Close"].iloc[-1])
+                chg = ((curr - prev) / prev) * 100
+                today_change = f"+{chg:.2f}%" if chg >= 0 else f"{chg:.2f}%"
+                today_change_float = chg
+
+            # 52W High/Low from 1y history
+            try:
+                if len(hist) > 5:
+                    high_val = round(float(hist["High"].max()), 2)
+                    low_val = round(float(hist["Low"].min()), 2)
+                    fifty_two_high_val = high_val
+                    fifty_two_low_val = low_val
+                    fifty_two_high = f"Rs.{high_val:,.2f}"
+                    fifty_two_low = f"Rs.{low_val:,.2f}"
+                else:
+                    fifty_two_high = "N/A"
+                    fifty_two_low = "N/A"
+            except Exception:
+                fifty_two_high = "N/A"
+                fifty_two_low = "N/A"
+
+        # Fallback price if history failed
+        if price is None:
+            price = 0.0
+
+        # --- INFO DICT (only for metadata) ---
+        info = fetch_info(ticker_symbol, ttl=300)
+
+        # P/E Ratio
+        pe = info.get("trailingPE") or info.get("forwardPE")
+        pe = round(float(pe), 1) if pe else "N/A"
+
+        # Dividend Yield — robust handling of decimal vs percent
+        raw_yield = info.get("dividendYield")
+        if raw_yield:
+            raw_yield = float(raw_yield)
+            # yfinance for .NS stocks always returns as decimal
+            # e.g. 0.0249 means 2.49%, 0.39 means 39% which is wrong
+            # Safe rule: if value > 0.25, it is already a percentage
+            if raw_yield > 0.25:
+                div_yield_float = round(raw_yield, 2)
+            else:
+                div_yield_float = round(raw_yield * 100, 2)
+            div_yield = f"{div_yield_float}%"
+        else:
+            div_yield = "0.00%"
+            div_yield_float = 0.0
+
+        # Market Cap — convert from raw rupees to Crores / Lakh Crores
+        raw_mkt_cap = info.get("marketCap", 0)
+        if raw_mkt_cap:
+            raw_mkt_cap = float(raw_mkt_cap)
+            crore_value = raw_mkt_cap / 10_000_000  # convert to Crores
+            if crore_value >= 100_000:  # >= 1 Lakh Crore
+                mkt_cap_str = f"{round(crore_value / 100_000, 2)} L Cr"
+            else:
+                mkt_cap_str = f"{round(crore_value, 2)} Cr"
+        else:
+            mkt_cap_str = "N/A"
+        raw_mkt_cap_float = raw_mkt_cap if raw_mkt_cap else 0
+
+        # Sector
+        sector = info.get("sector", "N/A")
+
+        return {
+            "price":               f"Rs.{price:,.2f}",
+            "price_float":         price,
+            "pe":                  pe,
+            "pe_float":            float(pe) if pe != "N/A" else 9999,
+            "div_yield":           div_yield,
+            "div_yield_float":     div_yield_float,
+            "market_cap":          mkt_cap_str,
+            "market_cap_float":    raw_mkt_cap_float,
+            "fifty_two_high":      fifty_two_high_val if fifty_two_high_val is not None else None,
+            "fifty_two_low":       fifty_two_low_val if fifty_two_low_val is not None else None,
+            "sector":              sector,
+            "today_change":        today_change,
+            "today_change_float":  today_change_float,
+        }
+    except Exception as e:
+        print(f"Error fetching {ticker_symbol}: {e}")
+        return None
+
+
+def get_stock_metrics_safe(ticker_symbol):
+    try:
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(get_stock_metrics, ticker_symbol)
+            return future.result(timeout=8)  # 8 second max per stock
+    except Exception as e:
+        print(f"Timeout or error fetching {ticker_symbol}: {e}")
+        return None
+
+
+def _extract_comparison_symbols_from_query(q: str, *, limit: int = 6) -> List[str]:
+    """
+    Extract comparison symbols from free text using a simple token-based parser:
+
+    1) Strip common connective words (compare, vs, and, with, between, or, please, me, the, stocks, stock)
+    2) Split by spaces/commas
+    3) Map tokens via COMMON_COMPARE_ALIASES first
+    4) Fallback to _normalize_symbol_maybe (yfinance-backed resolution) for remaining tokens
+    5) Deduplicate while preserving order; cap at `limit`
+    """
+    if not q:
+        return []
+
+    raw = (q or "").lower()
+    # First, resolve explicit commodity keywords/phrases so they never fall through to stock lookup.
+    commodity_symbols: List[str] = []
+    seen_symbols: set[str] = set()
+    raw_with_spaces = f" {raw} "
+    for name, ticker in COMMODITY_MAP.items():
+        needle = f" {name} "
+        if needle in raw_with_spaces and ticker not in seen_symbols:
+            commodity_symbols.append(ticker)
+            seen_symbols.add(ticker)
+            raw_with_spaces = raw_with_spaces.replace(needle, " ")
+    raw = raw_with_spaces.strip()
+    # Normalize some vs variants
+    raw = raw.replace("v/s", "vs").replace("v s", "vs").replace("vs.", "vs").replace("vc", "vs").replace("vd", "vs")
+
+    for w in _COMPARE_STOPWORDS:
+        raw = raw.replace(f" {w} ", " ")
+        if raw.startswith(w + " "):
+            raw = raw[len(w) + 1 :]
+        raw = raw.replace(" " + w + ",", " ")
+        raw = raw.replace("," + w + " ", " ")
+
+    tokens: List[str] = []
+    for part in raw.replace(",", " ").split():
+        t = part.strip().lower()
+        if not t or t in _COMPARE_STOPWORDS:
+            continue
+        tokens.append(t)
+
+    symbols: List[str] = []
+    seen: set[str] = set()
+
+    # 1) Alias dictionary
+    for tok in tokens:
+        mapped = _COMMON_COMPARE_ALIASES.get(tok)
+        if mapped and mapped not in seen:
+            symbols.append(mapped)
+            seen.add(mapped)
+            if len(commodity_symbols) + len(symbols) >= limit:
+                return commodity_symbols + symbols
+
+    # 2) Fallback: use existing symbol normalizer (yfinance-backed via resolve_symbol)
+    for tok in tokens:
+        mapped = _normalize_symbol_maybe(tok)
+        if mapped and mapped not in seen:
+            symbols.append(mapped)
+            seen.add(mapped)
+            if len(commodity_symbols) + len(symbols) >= limit:
+                break
+
+    return commodity_symbols + symbols
+
+_COMMON_COMPARE_ALIASES: Dict[str, str] = {
+    "tcs": "TCS.NS",
+    "reliance": "RELIANCE.NS",
+    "infy": "INFY.NS",
+    "infosys": "INFY.NS",
+    "hdfc": "HDFCBANK.NS",
+    "hdfcbank": "HDFCBANK.NS",
+    "wipro": "WIPRO.NS",
+    "hcl": "HCLTECH.NS",
+    "hcltech": "HCLTECH.NS",
+    "icici": "ICICIBANK.NS",
+    "icicibank": "ICICIBANK.NS",
+    "sbi": "SBIN.NS",
+    "bajaj": "BAJFINANCE.NS",
+    "bajajfinance": "BAJFINANCE.NS",
+    "axis": "AXISBANK.NS",
+    "axisbank": "AXISBANK.NS",
+    "kotak": "KOTAKBANK.NS",
+    "ongc": "ONGC.NS",
+    "tatamotors": "TATAMOTORS.NS",
+    "tata": "TATAMOTORS.NS",
+    "maruti": "MARUTI.NS",
+    "adani": "ADANIENT.NS",
+    "sunpharma": "SUNPHARMA.NS",
+    "sun": "SUNPHARMA.NS",
+    "ltim": "LTIM.NS",
+    "ltimindtree": "LTIM.NS",
+    "nifty": "^NSEI",
+    "sensex": "^BSESN",
+}
+
+_COMPARE_STOPWORDS = {
+    "compare",
+    "vs",
+    "versus",
+    "and",
+    "with",
+    "between",
+    "or",
+    "please",
+    "me",
+    "the",
+    "stocks",
+    "stock",
+}
+
+
+def _extract_comparison_symbols_from_query(q: str, *, limit: int = 6) -> List[str]:
+    """
+    Extract comparison symbols from free text using a simple token-based parser:
+
+    1) Strip common connective words (compare, vs, and, with, between, or, please, me, the, stocks, stock)
+    2) Split by spaces/commas
+    3) Map tokens via COMMON_COMPARE_ALIASES first
+    4) Fallback to _normalize_symbol_maybe (yfinance-backed resolution) for remaining tokens
+    5) Deduplicate while preserving order; cap at `limit`
+    """
+    if not q:
+        return []
+
+    raw = (q or "").lower()
+    for w in _COMPARE_STOPWORDS:
+        raw = raw.replace(f" {w} ", " ")
+        if raw.startswith(w + " "):
+            raw = raw[len(w) + 1 :]
+        raw = raw.replace(" " + w + ",", " ")
+        raw = raw.replace("," + w + " ", " ")
+
+    tokens: List[str] = []
+    for part in raw.replace(",", " ").split():
+        t = part.strip().lower()
+        if not t or t in _COMPARE_STOPWORDS:
+            continue
+        tokens.append(t)
+
+    symbols: List[str] = []
+    seen: set[str] = set()
+
+    # 1) Alias dictionary
+    for tok in tokens:
+        mapped = _COMMON_COMPARE_ALIASES.get(tok)
+        if mapped and mapped not in seen:
+            symbols.append(mapped)
+            seen.add(mapped)
+            if len(symbols) >= limit:
+                return symbols
+
+    # 2) Fallback: use existing symbol normalizer (yfinance-backed via resolve_symbol)
+    for tok in tokens:
+        mapped = _normalize_symbol_maybe(tok)
+        if mapped and mapped not in seen:
+            symbols.append(mapped)
+            seen.add(mapped)
+            if len(symbols) >= limit:
+                break
+
+    return symbols
 
 
 def _chat_response(payload: Dict[str, Any], updates: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -238,12 +597,1031 @@ def _normalize_symbol_maybe(s: str | None) -> Optional[str]:
     return resolve_symbol(ss) or None
 
 
+# Direction-aware impact text: (up_text, down_text)
+_MACRO_IMPACT_BY_DIRECTION: Dict[str, Tuple[str, str]] = {
+    "us_10y_yield": (
+        "Bond yield rose today. This tightens global liquidity and increases the discount rate on future earnings. IT and growth stocks face valuation pressure. Real estate and capital-heavy sectors also affected. Defensive sectors less impacted.",
+        "Bond yield fell today. This eases global liquidity conditions. Growth stocks like IT get relief as discount rates fall. Generally positive for equity valuations broadly.",
+    ),
+    "wti_crude": (
+        "Aviation, logistics, paints, and petrochemical sectors face margin pressure. ONGC and oil producers benefit. Inflation risk increases for India as a major oil importer.",
+        "Aviation and logistics get cost relief. India's trade deficit narrows. Inflation pressure eases. Negative for ONGC and oil producers.",
+    ),
+    "usd_inr": (
+        "IT exporters (TCS, INFY, WIPRO) and pharma exporters (Sun Pharma, Dr Reddy) benefit directly. Oil import costs rise. Airlines and importers face higher costs.",
+        "IT and pharma export revenues reduced in INR terms. Import costs ease. Oil companies benefit from lower input costs.",
+    ),
+    "gold": (
+        "Risk-off sentiment detected. Investors moving to safe havens. Broad equity markets may face selling pressure. FMCG and pharma as defensive plays preferred over cyclicals.",
+        "Risk appetite returning. Investors moving back to equities. Positive signal for broader market sentiment.",
+    ),
+    "india_vix": (
+        "Market fear rising. Short-term volatility expected. Reduce position sizes, tighten stop-losses. Avoid leveraged positions.",
+        "Market fear reducing. Stable conditions returning. Favorable for building equity positions gradually.",
+    ),
+}
+
+_MACRO_WHAT_MEANS_BY_DIRECTION: Dict[str, Tuple[str, str]] = {
+    "us_10y_yield": (
+        "Bond yield rose {cp:.2f}% to {cv:.2f} today. This tightens global liquidity and increases the discount rate on future earnings.",
+        "Bond yield fell {cp:.2f}% to {cv:.2f} today. This eases global liquidity conditions.",
+    ),
+    "wti_crude": (
+        "Crude oil rose {cp:.2f}% to {cv:.2f} today. India imports ~85% of its oil needs.",
+        "Crude oil fell {cp:.2f}% to {cv:.2f} today. Eases input cost pressure for oil-dependent sectors.",
+    ),
+    "usd_inr": (
+        "USD/INR rose {cp:.2f}% to {cv:.2f} — INR weakening. A higher value means more rupees per dollar.",
+        "USD/INR fell {cp:.2f}% to {cv:.2f} — INR strengthening. Import costs ease.",
+    ),
+    "gold": (
+        "Gold rose {cp:.2f}% to {cv:.2f} today. Gold is a global safe-haven asset.",
+        "Gold fell {cp:.2f}% to {cv:.2f} today. Suggests risk-on sentiment returning.",
+    ),
+    "india_vix": (
+        "India VIX rose {cp:.2f}% to {cv:.2f} today. Market fear has elevated. A VIX above 20 signals elevated volatility.",
+        "India VIX fell {cp:.2f}% to {cv:.2f} today. Market fear has reduced. A VIX below 20 is generally considered a calm zone.",
+    ),
+}
+
+_MACRO_LABELS: Dict[str, str] = {
+    "us_10y_yield": "US 10Y Bond Yield",
+    "wti_crude": "Crude Oil (WTI)",
+    "usd_inr": "USD/INR",
+    "gold": "Gold",
+    "india_vix": "India VIX",
+}
+
+
+HYPOTHETICAL_MACRO_KEYWORDS = ("if ", "when ", "suppose ", "assuming ", "what if ", "hypothetically", "in case ")
+
+
+def _is_hypothetical_macro_question(query: str) -> bool:
+    """Detect hypothetical macro questions (answer scenario, not current direction)."""
+    q = (query or "").lower()
+    return any(kw in q for kw in HYPOTHETICAL_MACRO_KEYWORDS)
+
+
+def _detect_hypothetical_scenario(query: str) -> Optional[Tuple[str, str]]:
+    """Detect (signal_key, direction) for hypothetical. direction: 'up' or 'down'."""
+    q = (query or "").lower()
+    if re.search(r"\b(bond|yield|10y|treasury)\b.*\b(ris(e|ing)|up|spike)\b", q) or re.search(r"\b(ris(e|ing)|up|spike)\b.*\b(bond|yield)\b", q):
+        return ("us_10y_yield", "up")
+    if re.search(r"\b(bond|yield)\b.*\b(fall|down|drop)\b", q) or re.search(r"\b(fall|down|drop)\b.*\b(bond|yield)\b", q):
+        return ("us_10y_yield", "down")
+    if re.search(r"\b(crude|oil)\b.*\b(ris(e|ing)|up|spike)\b", q) or re.search(r"\b(ris(e|ing)|up|spike)\b.*\b(crude|oil)\b", q):
+        return ("wti_crude", "up")
+    if re.search(r"\b(crude|oil)\b.*\b(fall|down|drop)\b", q):
+        return ("wti_crude", "down")
+    if re.search(r"\b(inr|rupee)\b.*\b(weak|weaken|fall|down)\b", q) or re.search(r"\b(usd|dollar)\b.*\b(ris(e|ing)|up)\b", q):
+        return ("usd_inr", "up")
+    if re.search(r"\b(inr|rupee)\b.*\b(strengthen|rise|up)\b", q):
+        return ("usd_inr", "down")
+    if re.search(r"\b(vix|volatility)\b.*\b(ris(e|ing)|up|spike)\b", q):
+        return ("india_vix", "up")
+    if re.search(r"\b(vix|volatility)\b.*\b(fall|down)\b", q):
+        return ("india_vix", "down")
+    if re.search(r"\b(gold)\b.*\b(ris(e|ing)|up|rally)\b", q):
+        return ("gold", "up")
+    if re.search(r"\b(gold)\b.*\b(fall|down)\b", q):
+        return ("gold", "down")
+    return None
+
+
+# Hypothetical scenario content: (sectors_avoid, sectors_benefit, stocks_avoid, stocks_prefer)
+_HYPOTHETICAL_SCENARIO_CONTENT: Dict[str, Dict[str, Tuple[List[str], List[str], List[str], List[str]]]] = {
+    "us_10y_yield": {
+        "up": (
+            ["IT / Technology — growth stock valuations compress", "Real Estate — higher borrowing costs hurt demand", "Capital Goods — financing costs increase", "NBFCs — cost of funds rises"],
+            ["Banking (PSU) — NIM expansion on lending rates", "Insurance — higher reinvestment yields"],
+            ["TCS", "INFY", "L&T", "Bajaj Finance"],
+            ["SBI", "Bank of Baroda", "LIC"],
+        ),
+        "down": (
+            ["Banking — NIM pressure", "Insurance — lower reinvestment yields"],
+            ["IT / Technology — discount rates fall", "Real Estate — borrowing cost relief", "Growth stocks"],
+            ["SBI", "Bank of Baroda"],
+            ["TCS", "INFY", "L&T"],
+        ),
+    },
+    "wti_crude": {
+        "up": (
+            ["Aviation — fuel costs spike", "Logistics — margin pressure", "Paints — raw material costs", "Petrochemicals"],
+            ["ONGC", "Oil India", "OIL — upstream producers benefit"],
+            ["IndiGo", "SpiceJet", "Asian Paints"],
+            ["ONGC", "Oil India"],
+        ),
+        "down": (
+            ["ONGC", "Oil producers — price decline"],
+            ["Aviation", "Logistics", "Paints — cost relief", "India trade deficit narrows"],
+            ["ONGC", "Oil India"],
+            ["IndiGo", "Asian Paints", "Delhivery"],
+        ),
+    },
+    "usd_inr": {
+        "up": (
+            ["Oil importers", "Airlines — USD costs", "Capital goods importers"],
+            ["IT exporters (TCS, INFY, WIPRO)", "Pharma exporters (Sun Pharma, Dr Reddy)"],
+            ["Bharat Petroleum", "IndiGo"],
+            ["TCS", "INFY", "Sun Pharma", "Dr Reddy"],
+        ),
+        "down": (
+            ["IT exporters", "Pharma exporters — INR revenue hit"],
+            ["Oil companies", "Importers", "Airlines"],
+            ["TCS", "INFY", "WIPRO"],
+            ["BPCL", "HPCL", "IndiGo"],
+        ),
+    },
+    "india_vix": {
+        "up": (
+            ["All sectors — broad selling pressure", "Avoid leveraged positions", "Reduce position sizes"],
+            [],
+            ["All stocks — tighten stop-losses"],
+            [],
+        ),
+        "down": (
+            [],
+            ["All sectors — stable conditions", "Favorable for building positions gradually"],
+            [],
+            ["Quality large-caps", "Index funds"],
+        ),
+    },
+    "gold": {
+        "up": (
+            ["Cyclicals", "Growth stocks", "IT — risk-off rotation"],
+            ["FMCG", "Pharma — defensive plays", "Banking"],
+            ["TCS", "INFY", "L&T"],
+            ["HUL", "ITC", "Sun Pharma", "SBI"],
+        ),
+        "down": (
+            ["Defensives may lag"],
+            ["Cyclicals", "IT", "Growth stocks — risk-on"],
+            [],
+            ["TCS", "INFY", "L&T"],
+        ),
+    },
+}
+
+
+def _format_hypothetical_macro_analysis(
+    signals: Dict[str, Any],
+    query: str,
+    scenario: Tuple[str, str],
+    data_timestamp: str,
+) -> str:
+    """Format hypothetical macro scenario (answer the scenario, not current direction)."""
+    signal_key, direction = scenario
+    label = _MACRO_LABELS.get(signal_key, signal_key)
+    dir_word = "RISING" if direction == "up" else "FALLING"
+    scenario_title = f"{dir_word} {label.upper().replace(' (WTI)', '')} SCENARIO"
+
+    s = signals.get(signal_key) if isinstance(signals, dict) else None
+    cv_str = "N/A"
+    cp_str = ""
+    if s and isinstance(s, dict):
+        cv = s.get("current_value")
+        cp = s.get("change_pct")
+        try:
+            cv = float(cv) if cv is not None else None
+            cp = float(cp) if cp is not None else None
+        except Exception:
+            cv, cp = None, None
+        if cv is not None:
+            cv_str = f"{cv:.2f}"
+        if cp is not None:
+            cp_str = f" ({cp:+.2f}% today)"
+
+    content = _HYPOTHETICAL_SCENARIO_CONTENT.get(signal_key, {}).get(direction)
+    avoid, benefit, stocks_avoid, stocks_prefer = ([], [], [], []) if not content else content
+
+    lines = [
+        f"**MACRO SIGNAL ANALYSIS — {scenario_title}**",
+        "",
+        f"**Current Live Value:** {cv_str}{cp_str}",
+        "",
+        f"**Your Question:** {query.strip()}",
+        "",
+        "**Sectors to AVOID when {} {}:**".format(label.split("(")[0].strip().lower(), "rises" if direction == "up" else "falls"),
+    ]
+    for item in avoid:
+        lines.append(f"• {item}")
+    if benefit:
+        lines.extend(["", "**Sectors that BENEFIT when {} {}:**".format(label.split("(")[0].strip().lower(), "rises" if direction == "up" else "falls")])
+        for item in benefit:
+            lines.append(f"• {item}")
+    if stocks_avoid or stocks_prefer:
+        lines.append("")
+        if stocks_avoid:
+            lines.append("**Stocks to watch:**")
+            lines.append(f"• Avoid: {', '.join(stocks_avoid)}")
+        if stocks_prefer:
+            lines.append(f"• Prefer: {', '.join(stocks_prefer)}")
+    lines.extend(["", f"**Data as of:** {data_timestamp}"])
+    return "\n".join(lines)
+
+
+def _detect_primary_macro_signal(query: str) -> str:
+    """Detect which macro signal the user is asking about. Returns signal key or first available."""
+    q = (query or "").lower()
+    if re.search(r"\b(vix|volatility)\b", q):
+        return "india_vix"
+    if re.search(r"\b(bond|yield|10y|10-y|treasury)\b", q):
+        return "us_10y_yield"
+    if re.search(r"\b(gold)\b", q):
+        return "gold"
+    if re.search(r"\b(crude|oil|wti|brent)\b", q):
+        return "wti_crude"
+    if re.search(r"\b(usd|inr|rupee|currency|forex)\b", q):
+        return "usd_inr"
+    return "india_vix"  # default to VIX for generic macro
+
+
+def _detect_target_sector(query: str) -> Optional[str]:
+    """Detect target sector from query for sector-specific impact."""
+    q = (query or "").lower()
+    if re.search(r"\baviation\b", q):
+        return "aviation"
+    if re.search(r"\b(it|technology|tech)\b", q):
+        return "IT"
+    if re.search(r"\b(banking|banks|financial)\b", q):
+        return "Banking"
+    if re.search(r"\b(energy|oil)\b", q):
+        return "Energy"
+    if re.search(r"\bpharma\b", q):
+        return "Pharma"
+    if re.search(r"\bfmcg\b", q):
+        return "FMCG"
+    return None
+
+
+def _format_macro_signal_analysis(
+    signals: Dict[str, Any],
+    causal_insights: List[Dict[str, Any]],
+    data_timestamp: str,
+    query: str,
+) -> str:
+    """Build the standard macro signal analysis format (direction-aware)."""
+    primary_key = _detect_primary_macro_signal(query)
+    label = _MACRO_LABELS.get(primary_key, "Macro Signal")
+    target_sector = _detect_target_sector(query)
+
+    s = signals.get(primary_key) if isinstance(signals, dict) else None
+    if not s or not isinstance(s, dict):
+        cv, cp, direction = None, None, "flat"
+    else:
+        cv = s.get("current_value")
+        cp = s.get("change_pct")
+        direction = s.get("direction") or "flat"
+        try:
+            cv = float(cv) if cv is not None else None
+            cp = float(cp) if cp is not None else None
+        except Exception:
+            cv, cp = None, None
+
+    lines = [
+        "**MACRO SIGNAL ANALYSIS**",
+        "",
+        f"**Signal:** {label}",
+        f"**Current Value:** {f'{cv:.2f}' if cv is not None else 'Unavailable'}",
+        f"**Today Change:** {f'{cp:+.2f}%' if cp is not None else 'N/A'} ({direction})",
+        "",
+        "**What This Means:**",
+    ]
+
+    if cv is not None and cp is not None:
+        what_tpls = _MACRO_WHAT_MEANS_BY_DIRECTION.get(primary_key)
+        if what_tpls:
+            up_tpl, down_tpl = what_tpls
+            tpl = up_tpl if cp > 0 else down_tpl
+            lines.append(tpl.format(cv=cv, cp=abs(cp)))
+        else:
+            lines.append(f"{label} is at {cv:.2f}, {'up' if cp > 0 else 'down'} {abs(cp):.2f}% today.")
+    else:
+        lines.append(f"Live data for {label} is temporarily unavailable. Please try again shortly.")
+
+    # Direction-aware impact
+    impact_tpls = _MACRO_IMPACT_BY_DIRECTION.get(primary_key)
+    impact_text = "Various sectors affected."
+    if impact_tpls:
+        impact_text = impact_tpls[0] if (cp is not None and cp > 0) else impact_tpls[1]
+    lines.extend(["", "**Impact on Indian Markets:**", impact_text])
+    if target_sector and target_sector.lower() == "aviation" and primary_key == "wti_crude":
+        lines.append("")
+        lines.append("For aviation specifically: Rising oil directly increases fuel costs and squeezes margins. Airlines face significant cost pressure when crude spikes.")
+
+    # Current Context: connect to other live signals
+    other_parts = []
+    for k, v in (signals or {}).items():
+        if k == primary_key or not isinstance(v, dict):
+            continue
+        cv2 = v.get("current_value")
+        cp2 = v.get("change_pct")
+        name = _MACRO_LABELS.get(k, k)
+        if cv2 is not None and cp2 is not None:
+            dir2 = "up" if float(cp2) > 0 else "down"
+            other_parts.append(f"{name} {dir2} {abs(float(cp2)):.2f}%")
+    if other_parts:
+        lines.extend(["", "**Current Context:**", f"Combined with {', '.join(other_parts[:3])}, markets are sending mixed signals. Exercise moderate caution."])
+    else:
+        lines.extend(["", "**Current Context:**", "Other macro signals are unavailable. Treat this as a snapshot, not timing advice."])
+
+    lines.extend(["", f"**Data as of:** {data_timestamp}"])
+    return "\n".join(lines)
+
+
+# Sector → (high_relevance_signals, low_relevance_signals)
+_SECTOR_SIGNAL_RELEVANCE: Dict[str, Tuple[List[str], List[str]]] = {
+    "IT": (["us_10y_yield", "usd_inr", "india_vix"], ["wti_crude", "gold"]),
+    "Banking": (["us_10y_yield", "india_vix", "usd_inr"], ["wti_crude", "gold"]),
+    "Energy": (["wti_crude", "usd_inr"], ["gold", "us_10y_yield"]),
+    "aviation": (["wti_crude", "usd_inr", "india_vix"], ["gold", "us_10y_yield"]),
+    "Pharma": (["usd_inr", "us_10y_yield"], ["wti_crude", "gold"]),
+    "FMCG": (["wti_crude"], ["india_vix", "gold"]),
+}
+
+
+def _detect_sector_macro_query(query: str) -> Optional[str]:
+    """Detect if query asks to connect macro to a sector."""
+    q = (query or "").lower()
+    if not re.search(r"\b(connect macro|macro (for|to|signals? for)|macro signals? (for|to))\b", q):
+        return None
+    for sector in ["IT", "Banking", "Energy", "aviation", "Pharma", "FMCG"]:
+        if sector.lower() in q or (sector == "IT" and re.search(r"\bit\b", q)):
+            return sector
+    return None
+
+
+def _format_sector_macro_analysis(
+    signals: Dict[str, Any],
+    sector: str,
+    data_timestamp: str,
+) -> str:
+    """Build sector-specific macro analysis."""
+    rel = _SECTOR_SIGNAL_RELEVANCE.get(sector, (["us_10y_yield", "usd_inr", "india_vix"], ["wti_crude", "gold"]))
+    high_sigs, low_sigs = rel
+
+    def _fmt_signal(key: str, impact: str) -> str:
+        s = signals.get(key) if isinstance(signals, dict) else None
+        if not s or not isinstance(s, dict):
+            return f"• {_MACRO_LABELS.get(key, key)}: N/A"
+        cv = s.get("current_value")
+        cp = s.get("change_pct")
+        try:
+            cv = float(cv) if cv is not None else None
+            cp = float(cp) if cp is not None else None
+        except Exception:
+            cv, cp = None, None
+        val = f"{cv:.2f}" if cv is not None else "N/A"
+        chg = f"({cp:+.2f}%)" if cp is not None else ""
+        return f"• {_MACRO_LABELS.get(key, key)}: {val} {chg} — {impact}"
+
+    sector_display = str(sector).upper()
+    lines = [f"**{sector_display} SECTOR — MACRO SIGNAL ANALYSIS**", "", "**Relevant Signals:**"]
+    for key in high_sigs:
+        impacts = {
+            "us_10y_yield": "IT/tech valuations sensitive to discount rates",
+            "usd_inr": "Exporters benefit from weaker INR" if sector in ("IT", "Pharma") else "FX impact on sector",
+            "india_vix": "Volatility affects liquidity and positioning",
+            "wti_crude": "Energy cost pass-through" if sector == "Energy" else "Fuel cost impact on aviation",
+        }
+        lines.append(_fmt_signal(key, impacts.get(key, "sector impact")))
+    lines.extend(["", "**Less Relevant Signals:**"])
+    for key in low_sigs:
+        imp = "minimal direct sector impact" if key in ("gold", "us_10y_yield") else "indirect risk sentiment"
+        lines.append(_fmt_signal(key, imp))
+    def _dir(key: str) -> Optional[str]:
+        s = signals.get(key) if isinstance(signals, dict) else None
+        if not isinstance(s, dict):
+            return None
+        d = s.get("direction")
+        if d in {"up", "down"}:
+            return d
+        try:
+            cp = float(s.get("change_pct"))
+            return "up" if cp > 0 else "down" if cp < 0 else "flat"
+        except Exception:
+            return None
+
+    bullish = 0
+    bearish = 0
+
+    # Sector-specific scoring using live directions
+    if sector_display == "IT":
+        if _dir("us_10y_yield") == "up":
+            bearish += 1
+        elif _dir("us_10y_yield") == "down":
+            bullish += 1
+        if _dir("usd_inr") == "up":  # INR weak
+            bullish += 1
+        elif _dir("usd_inr") == "down":
+            bearish += 1
+        if _dir("india_vix") == "up":
+            bearish += 1
+        elif _dir("india_vix") == "down":
+            bullish += 1
+    elif sector_display == "BANKING":
+        if _dir("us_10y_yield") == "up":
+            bullish += 1
+        elif _dir("us_10y_yield") == "down":
+            bearish += 1
+        if _dir("india_vix") == "up":
+            bearish += 1
+        elif _dir("india_vix") == "down":
+            bullish += 1
+        if _dir("usd_inr") == "up":
+            bearish += 1
+        elif _dir("usd_inr") == "down":
+            bullish += 1
+    elif sector_display == "ENERGY":
+        if _dir("wti_crude") == "up":
+            bullish += 1
+        elif _dir("wti_crude") == "down":
+            bearish += 1
+        if _dir("usd_inr") == "up":
+            bullish += 1
+        elif _dir("usd_inr") == "down":
+            bearish += 1
+        if _dir("india_vix") == "up":
+            bearish += 1
+        elif _dir("india_vix") == "down":
+            bullish += 1
+    elif sector_display == "PHARMA":
+        if _dir("usd_inr") == "up":
+            bullish += 1
+        elif _dir("usd_inr") == "down":
+            bearish += 1
+        if _dir("us_10y_yield") == "up":
+            bearish += 1
+        elif _dir("us_10y_yield") == "down":
+            bullish += 1
+        if _dir("india_vix") == "up":
+            bearish += 1
+        elif _dir("india_vix") == "down":
+            bullish += 1
+    elif sector_display == "FMCG":
+        if _dir("wti_crude") == "up":
+            bearish += 1
+        elif _dir("wti_crude") == "down":
+            bullish += 1
+        if _dir("india_vix") == "up":
+            bearish += 1
+        elif _dir("india_vix") == "down":
+            bullish += 1
+        if _dir("gold") == "up":
+            bullish += 1  # defensive tilt helps FMCG
+        elif _dir("gold") == "down":
+            bearish += 1
+
+    if bullish > bearish:
+        overall = "CAUTIOUSLY BULLISH"
+    elif bearish > bullish:
+        overall = "CAUTIOUSLY BEARISH"
+    else:
+        overall = "NEUTRAL"
+
+    if sector_display == "IT":
+        if overall == "CAUTIOUSLY BULLISH":
+            conclusion = (
+                "Macro signals are net supportive for IT. Weaker INR boosts export revenues while stable/falling yields reduce valuation pressure. "
+                "Recommend selective accumulation in quality IT names on dips."
+            )
+        elif overall == "CAUTIOUSLY BEARISH":
+            conclusion = (
+                "Macro headwinds outweigh tailwinds for IT currently. Elevated VIX and yield pressure suggest waiting for better entry points. "
+                "Prefer defensive allocation over aggressive IT buying."
+            )
+        else:
+            conclusion = (
+                "Macro signals are mixed for IT. No clear directional bias. Focus on stock-specific fundamentals and earnings quality rather than macro timing."
+            )
+    else:
+        # Generic but direction-aware for other sectors
+        if overall == "CAUTIOUSLY BULLISH":
+            conclusion = "Macro signals are net supportive for this sector. Prefer selective accumulation with staggered entries and normal risk controls."
+        elif overall == "CAUTIOUSLY BEARISH":
+            conclusion = "Macro headwinds dominate for this sector. Prefer a wait-and-watch stance or smaller position sizes until signals improve."
+        else:
+            conclusion = "Macro signals are mixed with no strong edge. Prioritize stock-specific fundamentals and risk management."
+
+    lines.extend(
+        [
+            "",
+            f"**Overall {sector_display} Sector Outlook: {overall}**",
+            conclusion,
+            "",
+            f"**Data as of:** {data_timestamp}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+_EDU_NEUTRAL_MACRO_PHRASES = (
+    "what if all signals are neutral",
+    "what does neutral mean",
+    "what if macro is neutral",
+    "all signals neutral",
+    "no signals",
+    "signals are calm",
+)
+
+
+def _is_neutral_macro_education(query: str) -> bool:
+    q = (query or "").lower().strip()
+    return any(p in q for p in _EDU_NEUTRAL_MACRO_PHRASES)
+
+
+def _fmt_live_signal_line(signals: Dict[str, Any], key: str, label: str) -> str:
+    s = signals.get(key) if isinstance(signals, dict) else None
+    if not isinstance(s, dict):
+        return f"• {label:<10}: N/A"
+    try:
+        cv = float(s.get("current_value")) if s.get("current_value") is not None else None
+        cp = float(s.get("change_pct")) if s.get("change_pct") is not None else None
+    except Exception:
+        cv, cp = None, None
+    val = f"{cv:.2f}" if cv is not None else "N/A"
+    chg = f"({cp:+.2f}%)" if cp is not None else ""
+    return f"• {label:<10}: {val} {chg}".rstrip()
+
+
+def _format_neutral_macro_scenario(signals: Dict[str, Any], data_timestamp: str) -> str:
+    lines = [
+        "**MACRO SCENARIO: ALL SIGNALS NEUTRAL**",
+        "",
+        "**What \"Neutral Macro\" Means:**",
+        "When all macro signals are near their baseline with minimal movement, it signals a low-volatility, range-bound market environment. "
+        "No strong directional catalyst is present from the macro side.",
+        "",
+        "**Current Live Signals for Reference:**",
+        _fmt_live_signal_line(signals, "us_10y_yield", "Bond Yield"),
+        _fmt_live_signal_line(signals, "wti_crude", "Crude Oil"),
+        _fmt_live_signal_line(signals, "usd_inr", "USD/INR"),
+        _fmt_live_signal_line(signals, "gold", "Gold"),
+        _fmt_live_signal_line(signals, "india_vix", "India VIX"),
+        "",
+        "**What to Do in a Neutral Macro Environment:**",
+        "• Focus shifts from macro timing to stock fundamentals",
+        "• Quality earnings, revenue growth, and management matter more than macro positioning",
+        "• Neutral macro is generally POSITIVE for equities as it removes uncertainty premium",
+        "• Good time for systematic SIP investments",
+        "• Sector rotation slows — broad market moves together",
+        "",
+        "**Sectors that Outperform in Neutral Macro:**",
+        "• Quality large-caps across IT, Banking, FMCG",
+        "• Dividend-paying stocks benefit from stability",
+        "• Mid-caps tend to outperform in low-VIX environments",
+        "",
+        f"**Data as of:** {data_timestamp}",
+    ]
+    return "\n".join(lines)
+
+
+_SECTOR_SAFETY_PHRASES = (
+    "safest sectors",
+    "which sectors are safe",
+    "best sectors right now",
+    "sectors to invest in",
+    "where to invest now",
+    "which sectors to buy",
+)
+
+
+def _is_sector_safety_query(query: str) -> bool:
+    q = (query or "").lower()
+    return any(p in q for p in _SECTOR_SAFETY_PHRASES)
+
+
+def _get_sig(signals: Dict[str, Any], key: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    s = signals.get(key) if isinstance(signals, dict) else None
+    if not isinstance(s, dict):
+        return None, None, None
+    try:
+        cv = float(s.get("current_value")) if s.get("current_value") is not None else None
+        cp = float(s.get("change_pct")) if s.get("change_pct") is not None else None
+    except Exception:
+        cv, cp = None, None
+    d = s.get("direction")
+    if d not in {"up", "down"} and cp is not None:
+        d = "up" if cp > 0 else "down" if cp < 0 else "flat"
+    return cv, cp, d
+
+
+def _format_sector_safety_ranking(signals: Dict[str, Any], data_timestamp: str) -> str:
+    y_cv, y_cp, y_dir = _get_sig(signals, "us_10y_yield")
+    c_cv, c_cp, c_dir = _get_sig(signals, "wti_crude")
+    fx_cv, fx_cp, fx_dir = _get_sig(signals, "usd_inr")
+    g_cv, g_cp, g_dir = _get_sig(signals, "gold")
+    v_cv, v_cp, v_dir = _get_sig(signals, "india_vix")
+
+    def _score_sector() -> List[Tuple[str, int, str]]:
+        out: List[Tuple[str, int, str]] = []
+
+        # FMCG
+        score = 0
+        reasons = []
+        if v_dir == "up":
+            score += 1
+            reasons.append("defensive demand on risk-off")
+        if g_dir == "up":
+            score += 1
+            reasons.append("risk-off support")
+        if c_dir == "up":
+            score -= 1
+            reasons.append("input cost pressure")
+        out.append(("FMCG", score, " + ".join(reasons) if reasons else "stable defensives"))
+
+        # IT
+        score = 0
+        reasons = []
+        if fx_dir == "up":
+            score += 1
+            reasons.append("INR weak export benefit")
+        if y_dir in {"down", "flat"}:
+            score += 1
+            reasons.append("valuation support")
+        if v_dir == "up":
+            score -= 1
+            reasons.append("growth sell-off risk")
+        if y_dir == "up":
+            score -= 1
+            reasons.append("discount rate pressure")
+        out.append(("IT", score, " + ".join(reasons) if reasons else "mixed macro"))
+
+        # Banking
+        score = 0
+        reasons = []
+        if y_dir == "up":
+            score += 1
+            reasons.append("NIM expansion")
+        if v_dir == "down":
+            score += 1
+            reasons.append("stable credit sentiment")
+        if v_dir == "up":
+            score -= 1
+            reasons.append("risk-off NPA fears")
+        out.append(("Banking", score, " + ".join(reasons) if reasons else "mixed yield + VIX"))
+
+        # Energy
+        score = 0
+        reasons = []
+        if c_dir == "up":
+            score += 1
+            reasons.append("crude revenue positive")
+        if c_dir == "down":
+            score -= 1
+            reasons.append("revenue pressure")
+        out.append(("Energy", score, " + ".join(reasons) if reasons else "crude dependent"))
+
+        # Aviation/Logistics
+        score = 0
+        reasons = []
+        if c_dir == "down":
+            score += 1
+            reasons.append("fuel cost relief")
+        if c_dir == "up":
+            score -= 1
+            reasons.append("fuel cost pressure")
+        out.append(("Aviation", score, " + ".join(reasons) if reasons else "fuel sensitive"))
+
+        # Pharma
+        score = 0
+        reasons = []
+        if fx_dir == "up":
+            score += 1
+            reasons.append("export benefit")
+        if v_dir == "up":
+            score += 1
+            reasons.append("defensive positioning")
+        out.append(("Pharma", score, " + ".join(reasons) if reasons else "defensive tilt"))
+
+        return out
+
+    scored = _score_sector()
+    scored_sorted = sorted(scored, key=lambda x: (-x[1], x[0]))
+
+    top = [s[0] for s in scored_sorted[:3]]
+    bottom = [s[0] for s in scored_sorted[-2:]]
+
+    lines = [
+        "**SECTOR SAFETY RANKING — CURRENT MACRO**",
+        "",
+        "**Live Signals Used:**",
+        _fmt_live_signal_line(signals, "us_10y_yield", "Bond Yield"),
+        _fmt_live_signal_line(signals, "wti_crude", "Crude Oil"),
+        _fmt_live_signal_line(signals, "usd_inr", "USD/INR"),
+        _fmt_live_signal_line(signals, "gold", "Gold"),
+        _fmt_live_signal_line(signals, "india_vix", "India VIX"),
+        "",
+        "**Sector Rankings (Safest to Riskiest):**",
+        "",
+        "| Rank | Sector    | Score | Key Reason |",
+        "|------|-----------|-------|------------|",
+    ]
+    for i, (sec, score, reason) in enumerate(scored_sorted, start=1):
+        lines.append(f"| {i} | {sec:<9} | {score:+d} | {reason} |")
+    lines.extend(
+        [
+            "",
+            f"**Top Pick Sectors Right Now:** {', '.join(top)}",
+            f"**Sectors to Avoid Right Now:** {', '.join(bottom)}",
+            "",
+            f"**Data as of:** {data_timestamp}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _format_stock_buy_analysis(
+    symbol: str,
+    decision: str,
+    confidence: int,
+    price: Any,
+    pe: Any,
+    sector: str,
+    sector_avg_pe: float,
+    div_yield: Any,
+    momentum_score: int,
+    prediction_score: int,
+    market_regime: str,
+    macro_overlay: List[str],
+    conclusion: str,
+) -> str:
+    """Build the standard stock buy/hold/sell format."""
+    clean = str(symbol).replace(".NS", "").replace(".BO", "")
+    price_str = f"Rs.{price:,.2f}" if price is not None and isinstance(price, (int, float)) else "N/A"
+    pe_str = f"{pe:.1f}" if pe is not None else "N/A"
+    div_str = f"{div_yield}%" if div_yield is not None else "N/A"
+
+    lines = [
+        f"**STOCK ANALYSIS: {clean}**",
+        "",
+        f"**Decision:** {decision}",
+        f"**Confidence:** {confidence}%",
+        f"**Current Price:** {price_str}",
+        "",
+        "**Fundamentals:**",
+        f"• P/E Ratio   : {pe_str} (Sector avg: ~{sector_avg_pe:.1f})",
+        f"• Sector      : {sector}",
+        f"• Dividend    : {div_str}",
+        "",
+        "**Technical Signals:**",
+        f"• Momentum    : {momentum_score}/100",
+        f"• Prediction  : {prediction_score}/100",
+        f"• Market Regime: {market_regime}",
+        "",
+        "**Macro Overlay (Live):**",
+    ]
+    for m in macro_overlay[:3]:
+        lines.append(f"• {m}")
+    if not macro_overlay:
+        lines.append("• Live macro data unavailable.")
+    lines.extend(["", "**Conclusion:**", conclusion, "", "**Risk Note:** Use this as decision support only."])
+    return "\n".join(lines)
+
+
+def _format_portfolio_analysis(
+    stocks: List[Dict[str, Any]],
+    allocations: List[Dict[str, Any]],
+    sector_breakdown: Dict[str, Any],
+    diversification_score: float,
+    risk_level: str,
+    suggestions: str,
+    macro_overlay: List[str],
+) -> str:
+    """Build the standard portfolio analysis format."""
+    lines = [
+        "**PORTFOLIO ANALYSIS**",
+        "",
+        "**Holdings:**",
+        "| Stock    | Price    | Weight | Sector           |",
+        "|----------|----------|--------|------------------|",
+    ]
+    by_sym = {s.get("symbol"): s for s in stocks if s.get("symbol")}
+    weights = {a["symbol"]: a["weight_percent"] for a in allocations if a.get("symbol")}
+    sector_weights: Dict[str, float] = {}
+    for a in allocations:
+        sym = a.get("symbol", "")
+        w = weights.get(sym, 0)
+        d = by_sym.get(sym) or {}
+        sec = str(d.get("sector") or "N/A")
+        sector_weights[sec] = sector_weights.get(sec, 0) + w
+    for a in allocations[:10]:
+        sym = a.get("symbol", "")
+        w = weights.get(sym, 0)
+        d = by_sym.get(sym) or {}
+        sec = str(d.get("sector") or "N/A")
+        name = str(sym).replace(".NS", "").replace(".BO", "")
+        price = d.get("price", "N/A")
+        price_str = f"Rs.{price:,.2f}" if isinstance(price, (int, float)) else str(price)
+        lines.append(f"| {name:<8} | {price_str:<8} | {w:.0f}%    | {sec:<16} |")
+
+    lines.extend(["", "**Sector Breakdown:**"])
+    for sec, pct in sorted(sector_weights.items(), key=lambda x: -x[1]):
+        lines.append(f"• {sec}: {round(pct)}%")
+
+    lines.extend(["", "**Macro Risk Overlay (Live):**"])
+    for m in macro_overlay[:3]:
+        lines.append(f"• {m}")
+    if not macro_overlay:
+        lines.append("• Live macro data unavailable.")
+
+    div_label = "Good" if diversification_score >= 60 else "Moderate" if diversification_score >= 40 else "Poor"
+    dominant = max(allocations, key=lambda a: weights.get(a.get("symbol", ""), 0)) if allocations else None
+    dom_name = str(dominant.get("symbol", "")).replace(".NS", "").replace(".BO", "") if dominant else ""
+    dom_w = weights.get(dominant.get("symbol", ""), 0) if dominant else 0
+    conc_label = f"{dom_name} at {dom_w:.0f}%" if dom_w >= 40 else "None"
+    lines.extend([
+        "",
+        "**Risk Assessment:**",
+        f"• Diversification : {div_label}",
+        f"• Concentration   : {conc_label}",
+        f"• Macro Exposure  : {risk_level} risk",
+        "",
+        "**Recommendations:**",
+        suggestions or "Maintain discipline with position sizing.",
+        "",
+        "**Risk Note:** Not personalised financial advice.",
+    ])
+    return "\n".join(lines)
+
+
+COMMODITY_ASSETS: Dict[str, Dict[str, str]] = {
+    "gold": {"name": "Gold (Commodity)", "ticker": "GC=F", "sector": "Commodity"},
+    "silver": {"name": "Silver (Commodity)", "ticker": "SI=F", "sector": "Commodity"},
+    "oil": {"name": "Crude Oil (Commodity)", "ticker": "CL=F", "sector": "Commodity"},
+    "bitcoin": {"name": "Bitcoin", "ticker": "BTC-USD", "sector": "Crypto"},
+    "btc": {"name": "Bitcoin", "ticker": "BTC-USD", "sector": "Crypto"},
+}
+
+def handle_neutral_macro_scenario(signals, causal_insights):
+    from datetime import datetime, timezone, timedelta
+
+    IST = timezone(timedelta(hours=5, minutes=30))
+    timestamp = datetime.now(IST).strftime("%d/%m/%Y, %I:%M:%S %p IST")
+
+    bond = signals.get("bond_yield", {}) or {}
+    crude = signals.get("crude_oil", {}) or {}
+    inr = signals.get("usd_inr", {}) or {}
+    gold = signals.get("gold", {}) or {}
+    vix = signals.get("india_vix", {}) or {}
+
+    response = f"""**MACRO SCENARIO: ALL SIGNALS NEUTRAL**
+
+**What "Neutral Macro" Means:**
+When all macro signals show minimal movement near baseline, 
+it signals a low-volatility, range-bound environment. 
+No strong directional catalyst is present from the macro side. 
+This is generally positive for equities as it removes the 
+uncertainty premium from valuations.
+
+**Current Live Signals for Reference:**
+- Bond Yield : {round(float(bond.get('current_value', 0)), 2)} ({float(bond.get('change_pct', 0)):+.2f}%)
+- Crude Oil  : {round(float(crude.get('current_value', 0)), 2)} ({float(crude.get('change_pct', 0)):+.2f}%)
+- USD/INR    : {round(float(inr.get('current_value', 0)), 2)} ({float(inr.get('change_pct', 0)):+.2f}%)
+- Gold       : {round(float(gold.get('current_value', 0)), 2)} ({float(gold.get('change_pct', 0)):+.2f}%)
+- India VIX  : {round(float(vix.get('current_value', 0)), 2)} ({float(vix.get('change_pct', 0)):+.2f}%)
+
+**What to Do in a Neutral Macro Environment:**
+- Focus shifts from macro timing to stock fundamentals
+- Quality earnings, revenue growth, and management matter more
+- Good time for systematic SIP investments
+- Sector rotation slows — broad market moves together
+- Mid-caps tend to outperform in low-VIX environments
+
+**Sectors that Outperform in Neutral Macro:**
+- Quality large-caps across IT, Banking, FMCG
+- Dividend-paying stocks benefit from stability
+- Growth stocks recover as uncertainty premium fades
+
+**Data as of:** {timestamp}"""
+    return {"message": response}
+
+
+def handle_sector_safety_ranking(signals, causal_insights):
+    from datetime import datetime, timezone, timedelta
+
+    IST = timezone(timedelta(hours=5, minutes=30))
+    timestamp = datetime.now(IST).strftime("%d/%m/%Y, %I:%M:%S %p IST")
+
+    bond = signals.get("bond_yield", {}) or {}
+    crude = signals.get("crude_oil", {}) or {}
+    inr = signals.get("usd_inr", {}) or {}
+    gold = signals.get("gold", {}) or {}
+    vix = signals.get("india_vix", {}) or {}
+
+    bond_chg = float(bond.get("change_pct", 0) or 0)
+    crude_chg = float(crude.get("change_pct", 0) or 0)
+    inr_chg = float(inr.get("change_pct", 0) or 0)
+    gold_chg = float(gold.get("change_pct", 0) or 0)
+    vix_val = float(vix.get("current_value", 0) or 0)
+    vix_chg = float(vix.get("change_pct", 0) or 0)
+
+    # Score each sector
+    scores = {
+        "FMCG": 0,
+        "Pharma": 0,
+        "IT": 0,
+        "Banking": 0,
+        "Energy": 0,
+        "Aviation/Logistics": 0,
+    }
+    reasons = {k: [] for k in scores}
+
+    # FMCG scoring
+    if vix_chg > 3:
+        scores["FMCG"] += 1
+        reasons["FMCG"].append("defensive demand in high VIX")
+    if gold_chg > 0.5:
+        scores["FMCG"] += 1
+        reasons["FMCG"].append("risk-off favors defensives")
+    if crude_chg > 1:
+        scores["FMCG"] -= 1
+        reasons["FMCG"].append("crude up = input cost pressure")
+
+    # Pharma scoring
+    if inr_chg > 0.3:
+        scores["Pharma"] += 2
+        reasons["Pharma"].append("weak INR boosts export revenues")
+    if vix_chg > 3:
+        scores["Pharma"] += 1
+        reasons["Pharma"].append("defensive positioning in fear")
+
+    # IT scoring
+    if inr_chg > 0.3:
+        scores["IT"] += 2
+        reasons["IT"].append("weak INR = export revenue tailwind")
+    if bond_chg > 0.5:
+        scores["IT"] -= 1
+        reasons["IT"].append("rising yields compress valuations")
+    if vix_chg > 5:
+        scores["IT"] -= 1
+        reasons["IT"].append("high VIX = growth sell-off risk")
+
+    # Banking scoring
+    if bond_chg > 0.3:
+        scores["Banking"] += 1
+        reasons["Banking"].append("rising yields expand NIM")
+    if vix_val > 20 and vix_chg > 3:
+        scores["Banking"] -= 1
+        reasons["Banking"].append("high VIX = NPA risk perception")
+
+    # Energy scoring
+    if crude_chg > 1:
+        scores["Energy"] += 2
+        reasons["Energy"].append("rising crude = revenue positive")
+    elif crude_chg < -1:
+        scores["Energy"] -= 2
+        reasons["Energy"].append("falling crude = revenue pressure")
+
+    # Aviation scoring
+    if crude_chg > 1:
+        scores["Aviation/Logistics"] -= 2
+        reasons["Aviation/Logistics"].append("rising crude = fuel cost pressure")
+    elif crude_chg < -1:
+        scores["Aviation/Logistics"] += 2
+        reasons["Aviation/Logistics"].append("falling crude = cost relief")
+
+    # Sort by score descending
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    table_rows = ""
+    for i, (sector, score) in enumerate(ranked, 1):
+        reason = reasons[sector][0] if reasons[sector] else "Neutral macro impact"
+        sign = "+" if score >= 0 else ""
+        table_rows += f"| {i} | {sector:<22} | {sign}{score:>2}  | {reason:<35} |\n"
+
+    top_sectors = [s for s, sc in ranked if sc > 0][:3]
+    avoid_sectors = [s for s, sc in ranked if sc < 0]
+    top_str = ", ".join(top_sectors) if top_sectors else "No clear favorites"
+    avoid_str = ", ".join(avoid_sectors) if avoid_sectors else "None"
+
+    response = f"""**SECTOR SAFETY RANKING — CURRENT MACRO**
+
+**Live Signals Used:**
+- Bond Yield : {round(float(bond.get('current_value', 0)), 2)} ({bond_chg:+.2f}%)
+- Crude Oil  : {round(float(crude.get('current_value', 0)), 2)} ({crude_chg:+.2f}%)
+- USD/INR    : {round(float(inr.get('current_value', 0)), 2)} ({inr_chg:+.2f}%)
+- Gold       : {round(float(gold.get('current_value', 0)), 2)} ({gold_chg:+.2f}%)
+- India VIX  : {round(float(vix.get('current_value', 0)), 2)} ({vix_chg:+.2f}%)
+
+**Sector Rankings (Safest to Riskiest):**
+
+| Rank | Sector                 | Score | Key Reason                          |
+|------|------------------------|-------|-------------------------------------|
+{table_rows}
+**Top Sectors Right Now    :** {top_str}
+**Sectors to Be Cautious  :** {avoid_str}
+
+**Data as of:** {timestamp}"""
+    return {"message": response}
+
+
 def _extract_portfolio_allocations(query: str) -> List[Dict[str, Any]]:
     """
     Parse simple portfolio input patterns:
       "Reliance 40%"
       "TCS 30%"
-      "HDFC Bank 30%"
+      "gold 20%"  -> GC=F (commodity, never GOLDENTOBC)
     """
     q = (query or "").strip()
     if not q:
@@ -258,6 +1636,18 @@ def _extract_portfolio_allocations(query: str) -> List[Dict[str, Any]]:
         except Exception:
             continue
         if w <= 0:
+            continue
+        name_clean = name.strip().lower()
+        # Commodity/crypto assets: never resolve to NSE stock
+        if name_clean in COMMODITY_ASSETS:
+            info = COMMODITY_ASSETS[name_clean]
+            allocs.append({
+                "symbol": info["ticker"],
+                "weight_percent": w,
+                "asset_type": "commodity",
+                "display_name": info["name"],
+                "sector": info["sector"],
+            })
             continue
         sym = resolve_symbol(name.strip()) or resolve_symbol(name.strip().upper())
         if not sym:
@@ -366,81 +1756,198 @@ async def _multi_comparison_result(symbols: List[str]) -> Optional[Dict[str, Any
     - highest dividend yield
     - largest market cap
     """
-    from app.services.stock_service import get_stock_detail
-
     if len(symbols) < 2:
         return None
 
     rows: List[Dict[str, Any]] = []
+    has_commodity = False
+    has_stock = False
+
     for raw in symbols:
+        # Commodity tickers (from COMMODITY_MAP) are handled first and never fall through to stock lookup.
+        if raw in _COMMODITY_TICKERS:
+            has_commodity = True
+            sym = raw
+            try:
+                from app.utils.datetime_utils import get_ist_now
+
+                def _fetch():
+                    hist_1y = fetch_history(sym, period="1y", ttl=60)
+                    if hist_1y is None or hist_1y.empty:
+                        return None
+
+                    curr = float(hist_1y["Close"].iloc[-1])
+                    # Today change
+                    today_change = None
+                    if len(hist_1y) >= 2:
+                        prev = float(hist_1y["Close"].iloc[-2])
+                        if prev:
+                            today_change = ((curr - prev) / prev) * 100
+
+                    # 52W High / Low
+                    high_52w = float(hist_1y["High"].max())
+                    low_52w = float(hist_1y["Low"].min())
+
+                    # 1M / 3M / YTD change
+                    hist_1m = fetch_history(sym, period="1mo", ttl=60)
+                    hist_3m = fetch_history(sym, period="3mo", ttl=60)
+                    year = get_ist_now().year
+                    hist_ytd = fetch_history(sym, start=f"{year}-01-01", period="1y", ttl=60)
+
+                    def _series_change(h):
+                        try:
+                            if h is not None and not h.empty:
+                                base = float(h["Close"].iloc[0])
+                                if base:
+                                    return ((curr - base) / base) * 100
+                        except Exception:
+                            return None
+                        return None
+
+                    chg_1m = _series_change(hist_1m)
+                    chg_3m = _series_change(hist_3m)
+                    chg_ytd = _series_change(hist_ytd)
+
+                    return {
+                        "price": curr,
+                        "high_52w": high_52w,
+                        "low_52w": low_52w,
+                        "today_change": today_change,
+                        "change_1m": chg_1m,
+                        "change_3m": chg_3m,
+                        "change_ytd": chg_ytd,
+                    }
+
+                metrics = await anyio.to_thread.run_sync(_fetch)
+            except Exception:
+                metrics = None
+
+            if not isinstance(metrics, dict):
+                rows.append(
+                    {
+                        "symbol": sym,
+                        "name": str(sym),
+                        "assetType": "Commodity",
+                        "price": None,
+                        "pe": None,
+                        "dividendYield": None,
+                        "sector": None,
+                        "marketCap": None,
+                        "high_52w": None,
+                        "low_52w": None,
+                        "todayChange": None,
+                        "change1m": None,
+                        "change3m": None,
+                        "changeYtd": None,
+                    }
+                )
+                continue
+
+            rows.append(
+                {
+                    "symbol": sym,
+                    "name": str(sym),
+                    "assetType": "Commodity",
+                    "price": metrics.get("price"),
+                    "pe": None,
+                    "dividendYield": None,
+                    "sector": "Commodity",
+                    "marketCap": None,
+                    "high_52w": metrics.get("high_52w"),
+                    "low_52w": metrics.get("low_52w"),
+                    "todayChange": metrics.get("today_change"),
+                    "change1m": metrics.get("change_1m"),
+                    "change3m": metrics.get("change_3m"),
+                    "changeYtd": metrics.get("change_ytd"),
+                    # Raw metrics for comparison logic
+                    "price_float": metrics.get("price"),
+                    "pe_float": None,
+                    "div_yield_float": None,
+                    "market_cap_float": None,
+                    "today_change_float": metrics.get("today_change"),
+                    "market_cap_display": None,
+                    "dividendYield_display": None,
+                    "price_display": None,
+                }
+            )
+            continue
+
+        # Stock path (existing behaviour)
         sym = _normalize_symbol_maybe(raw)
         if not sym:
+            rows.append(
+                {
+                    "symbol": raw,
+                    "name": str(raw).replace(".NS", "").replace(".BO", ""),
+                    "assetType": "Stock",
+                    "price": None,
+                    "pe": None,
+                    "dividendYield": None,
+                    "sector": None,
+                    "marketCap": None,
+                    "high_52w": None,
+                    "low_52w": None,
+                    "todayChange": None,
+                    "change1m": None,
+                    "change3m": None,
+                    "changeYtd": None,
+                }
+            )
             continue
-        try:
-            detail = await _run_sync_with_timeout(get_stock_detail, sym, timeout_s=10.0)
-        except Exception:
-            # Skip symbols that fail to fetch instead of crashing the comparison engine
+
+        has_stock = True
+        metrics = await anyio.to_thread.run_sync(get_stock_metrics_safe, sym)
+        if not isinstance(metrics, dict):
+            rows.append(
+                {
+                    "symbol": sym,
+                    "name": str(sym).replace(".NS", "").replace(".BO", ""),
+                    "assetType": "Stock",
+                    "price": None,
+                    "pe": None,
+                    "dividendYield": None,
+                    "sector": None,
+                    "marketCap": None,
+                    "high_52w": None,
+                    "low_52w": None,
+                    "todayChange": None,
+                    "change1m": None,
+                    "change3m": None,
+                    "changeYtd": None,
+                }
+            )
             continue
-        if not isinstance(detail, dict) or detail.get("error"):
-            continue
-        name = str(detail.get("symbol") or sym).replace(".NS", "").replace(".BO", "")
-        pe = detail.get("pe")
-        dy = detail.get("dividendYield", 0) or 0
-        sector = detail.get("sector")
-        price = detail.get("price")
-        mc = detail.get("marketCap")
+
         rows.append(
             {
-                "symbol": detail.get("symbol") or sym,
-                "name": name,
-                "price": price,
-                "pe": pe,
-                "dividendYield": dy,
-                "sector": sector,
-                "marketCap": mc,
+                "symbol": sym,
+                "name": str(sym).replace(".NS", "").replace(".BO", ""),
+                "assetType": "Stock",
+                # Display fields (numeric for formatting helpers)
+                "price": metrics.get("price_float"),
+                "pe": metrics.get("pe_float"),
+                "dividendYield": metrics.get("div_yield_float"),
+                "sector": metrics.get("sector"),
+                "marketCap": metrics.get("market_cap_float"),
+                "high_52w": metrics.get("fifty_two_high"),
+                "low_52w": metrics.get("fifty_two_low"),
+                "todayChange": metrics.get("today_change_float"),
+                "change1m": None,
+                "change3m": None,
+                "changeYtd": None,
+                # Raw metrics for winner logic
+                "price_float": metrics.get("price_float"),
+                "pe_float": metrics.get("pe_float"),
+                "div_yield_float": metrics.get("div_yield_float"),
+                "market_cap_float": metrics.get("market_cap_float"),
+                "today_change_float": metrics.get("today_change_float"),
+                "market_cap_display": metrics.get("market_cap"),
+                "dividendYield_display": metrics.get("div_yield"),
+                "price_display": metrics.get("price"),
             }
         )
 
     # Caller is responsible for enforcing minimum valid rows; keep rows even if < 2 for better messaging.
-
-    def _float_or_none(x: Any) -> Optional[float]:
-        try:
-            return float(x)
-        except Exception:
-            return None
-
-    def _parse_market_cap(x: Any) -> Optional[float]:
-        """
-        Convert market cap strings like \"9.3L Cr\" into a numeric value for comparison.
-        The exact scale is less important than consistent ordering.
-        """
-        if x is None:
-            return None
-        if isinstance(x, (int, float)):
-            return float(x)
-        s = str(x).strip().replace(",", "").lower()
-        if not s:
-            return None
-        num_str = ""
-        for ch in s:
-            if ch.isdigit() or ch in {".", "-"}:
-                num_str += ch
-            elif num_str:
-                break
-        try:
-            base = float(num_str)
-        except Exception:
-            return None
-        factor = 1.0
-        if "l" in s and "cr" in s:
-            factor = 1e5  # lakh crore
-        elif "cr" in s:
-            factor = 1e2  # crore
-        elif "l" in s:
-            factor = 1e3  # lakh
-        elif "t" in s:
-            factor = 1e12  # trillion style
-        return base * factor
 
     # Leaders and interpretation are computed defensively; any failure should not crash the advisor.
     interpretation: List[str] = []
@@ -449,30 +1956,38 @@ async def _multi_comparison_result(symbols: List[str]) -> Optional[Dict[str, Any
     size_leader: Optional[Dict[str, Any]] = None
     growth_candidate: Optional[Dict[str, Any]] = None
     conclusion_lines: List[str] = []
+    best_today: Optional[Dict[str, Any]] = None
+    best_1m: Optional[Dict[str, Any]] = None
+    best_3m: Optional[Dict[str, Any]] = None
+    overall_trend_text: Optional[str] = None
 
     try:
-        # Prepare numeric fields
+        # Prepare numeric fields from *_float helpers
         for r in rows:
-            r["peNumeric"] = _float_or_none(r.get("pe"))
-            r["dividendYieldNumeric"] = _float_or_none(r.get("dividendYield"))
-            mc_num = _parse_market_cap(r.get("marketCap"))
-            # If parsing fails, treat as 0 to keep comparisons stable but non-crashing
-            r["marketCapNumeric"] = mc_num if mc_num is not None else 0.0
+            r["peNumeric"] = r.get("pe_float")
+            r["dividendYieldNumeric"] = r.get("div_yield_float")
+            r["marketCapNumeric"] = r.get("market_cap_float")
+            r["todayChangeNumeric"] = r.get("today_change_float")
 
-        # Valuation leader: lowest positive P/E
-        val_candidates = [r for r in rows if (r.get("peNumeric") is not None and r.get("peNumeric") > 0)]
-        if val_candidates:
-            valuation_leader = min(val_candidates, key=lambda x: x.get("peNumeric", float("inf")))
+        # Stock-only style leaders (valuation, income, size, momentum)
+        stock_rows = [r for r in rows if r.get("assetType") != "Commodity"]
+        if stock_rows:
+            val_candidates = [r for r in stock_rows if (r.get("peNumeric") is not None and r.get("peNumeric") > 0)]
+            if val_candidates:
+                valuation_leader = min(val_candidates, key=lambda x: x.get("peNumeric", float("inf")))
 
-        # Income leader: highest dividend yield
-        inc_candidates = [r for r in rows if r.get("dividendYieldNumeric") is not None]
-        if inc_candidates:
-            income_leader = max(inc_candidates, key=lambda x: x.get("dividendYieldNumeric", 0.0))
+            inc_candidates = [r for r in stock_rows if r.get("dividendYieldNumeric") is not None]
+            if inc_candidates:
+                income_leader = max(inc_candidates, key=lambda x: x.get("dividendYieldNumeric", 0.0))
 
-        # Size leader: largest numeric market cap
-        size_candidates = [r for r in rows if r.get("marketCapNumeric") is not None]
-        if size_candidates:
-            size_leader = max(size_candidates, key=lambda x: x.get("marketCapNumeric", 0.0))
+            size_candidates = [r for r in stock_rows if r.get("marketCapNumeric") is not None]
+            if size_candidates:
+                size_leader = max(size_candidates, key=lambda x: x.get("marketCapNumeric", 0.0))
+
+            mom_candidates = [r for r in stock_rows if r.get("todayChangeNumeric") is not None]
+            momentum_leader = max(mom_candidates, key=lambda x: x.get("todayChangeNumeric", 0.0)) if mom_candidates else None
+        else:
+            momentum_leader = None
 
         if valuation_leader:
             interpretation.append(f"{valuation_leader['name']} has the lowest valuation based on P/E among the compared stocks.")
@@ -482,9 +1997,10 @@ async def _multi_comparison_result(symbols: List[str]) -> Optional[Dict[str, Any
             interpretation.append(f"{size_leader['name']} is the largest company by reported market capitalisation.")
 
         # Growth candidate: highest P/E (market pricing in growth)
-        growth_candidates = [r for r in val_candidates]  # reuse filtered P/E-positive set
-        if growth_candidates:
-            growth_candidate = max(growth_candidates, key=lambda x: x.get("peNumeric", 0.0))
+        if stock_rows:
+            growth_candidates = [r for r in stock_rows if (r.get("peNumeric") is not None and r.get("peNumeric") > 0)]
+            if growth_candidates:
+                growth_candidate = max(growth_candidates, key=lambda x: x.get("peNumeric", 0.0))
 
         if valuation_leader:
             conclusion_lines.append(f"- Valuation leader: {valuation_leader['name']} (lowest P/E among peers).")
@@ -494,8 +2010,54 @@ async def _multi_comparison_result(symbols: List[str]) -> Optional[Dict[str, Any
             conclusion_lines.append(
                 f"- Growth candidate: {growth_candidate['name']} (higher P/E suggests the market is pricing in more growth; validate with your own research)."
             )
-        if not conclusion_lines:
+        if not conclusion_lines and stock_rows:
             conclusion_lines.append("- No clear standouts on valuation, dividends, or size based on available data.")
+
+        # Commodity / mixed comparison winners (price-based performance)
+        if has_commodity:
+            # Best performers based on price changes
+            today_candidates = [r for r in rows if isinstance(r.get("todayChange"), (int, float))]
+            if today_candidates:
+                best_today = max(today_candidates, key=lambda x: x.get("todayChange", 0.0))
+
+            m1_candidates = [r for r in rows if isinstance(r.get("change1m"), (int, float))]
+            if m1_candidates:
+                best_1m = max(m1_candidates, key=lambda x: x.get("change1m", 0.0))
+
+            m3_candidates = [r for r in rows if isinstance(r.get("change3m"), (int, float))]
+            if m3_candidates:
+                best_3m = max(m3_candidates, key=lambda x: x.get("change3m", 0.0))
+
+            # Macro-aware overall trend from cross-market signals (best-effort)
+            try:
+                from app.services.cross_market_service import get_cross_market_signals
+
+                sigs = get_cross_market_signals() or {}
+                gold = sigs.get("gold") or {}
+                crude = sigs.get("wti_crude") or sigs.get("crude_oil") or {}
+                usd_inr = sigs.get("usd_inr") or {}
+
+                parts: List[str] = []
+                if isinstance(gold, dict) and gold.get("current_value") is not None:
+                    parts.append(
+                        f"Gold is around {float(gold['current_value']):.2f}, "
+                        f"{'up' if (gold.get('change_pct') or 0) > 0 else 'down' if (gold.get('change_pct') or 0) < 0 else 'flat'} "
+                        f"{abs(float(gold.get('change_pct') or 0)):.2f}% today."
+                    )
+                if isinstance(crude, dict) and crude.get("current_value") is not None:
+                    parts.append(
+                        f"Crude oil trades near {float(crude['current_value']):.2f}, "
+                        f"{'rising' if (crude.get('change_pct') or 0) > 0 else 'easing' if (crude.get('change_pct') or 0) < 0 else 'flat'} on the day."
+                    )
+                if isinstance(usd_inr, dict) and usd_inr.get("current_value") is not None:
+                    parts.append(
+                        f"USD/INR is around {float(usd_inr['current_value']):.2f}, "
+                        f"{'indicating a weaker rupee' if (usd_inr.get('change_pct') or 0) > 0 else 'suggesting a stable to stronger rupee' if (usd_inr.get('change_pct') or 0) < 0 else 'showing a steady currency pair'}."
+                    )
+                overall_trend_text = " ".join(parts) if parts else None
+            except Exception:
+                overall_trend_text = None
+
     except Exception:
         # If anything goes wrong in leader/interpretation logic, fall back to a neutral explanation
         interpretation = []
@@ -503,22 +2065,34 @@ async def _multi_comparison_result(symbols: List[str]) -> Optional[Dict[str, Any
         income_leader = None
         size_leader = None
         growth_candidate = None
+        momentum_leader = None
         conclusion_lines = [
             "- Comparison signals are mixed or temporarily unavailable based on the fetched data.",
-            "- Consider reviewing each stock's fundamentals and your own risk profile before deciding.",
+            "- Consider reviewing each asset's fundamentals and your own risk profile before deciding.",
         ]
 
     return {
         "rows": rows,
+        "has_commodity": has_commodity,
+        "has_stock": has_stock,
         "leaders": {
             "valuation_leader": valuation_leader,
             "income_leader": income_leader,
             "size_leader": size_leader,
             "growth_candidate": growth_candidate,
+            "momentum_leader": momentum_leader,
+            "best_today": best_today,
+            "best_1m": best_1m,
+            "best_3m": best_3m,
+            "overall_trend_text": overall_trend_text,
         },
         "interpretation": interpretation,
         "conclusion": conclusion_lines,
     }
+
+
+def _is_commodity_ticker(sym: str) -> bool:
+    return str(sym).upper() in ("GC=F", "SI=F", "CL=F", "BTC-USD")
 
 
 async def _portfolio_allocation_analysis(allocs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -526,6 +2100,7 @@ async def _portfolio_allocation_analysis(allocs: List[Dict[str, Any]]) -> Option
         return None
 
     from app.services.stock_service import get_stock_detail
+    from app.utils.yfinance_wrapper import fetch_history
 
     # Normalize weights
     weights = [float(a["weight_percent"]) for a in allocs if a.get("symbol")]
@@ -538,14 +2113,42 @@ async def _portfolio_allocation_analysis(allocs: List[Dict[str, Any]]) -> Option
     # Fetch details with timeout
     details: List[Dict[str, Any]] = []
     sector_breakdown: Dict[str, int] = {}
-    for a in normalized[:15]:
-        sym = _normalize_symbol_maybe(a["symbol"])
+    for a in allocs[:15]:
+        sym = a.get("symbol")
         if not sym:
             continue
-        d = await _run_sync_with_timeout(get_stock_detail, sym, timeout_s=10.0)
+        w = float(a.get("weight_percent", 0)) / total
+        if _is_commodity_ticker(sym):
+            # Fetch commodity price from yfinance
+            try:
+                hist = await _run_sync_with_timeout(
+                    fetch_history, sym, period="5d", interval="1d", ttl=60, timeout_s=10.0,
+                )
+                price = None
+                if hist is not None and not hist.empty and "Close" in hist:
+                    price = float(hist["Close"].iloc[-1])
+                info = next((v for v in COMMODITY_ASSETS.values() if v["ticker"] == sym), {})
+                d_out = {
+                    "symbol": sym,
+                    "price": price,
+                    "sector": info.get("sector", "Commodity"),
+                    "pe": None,
+                }
+                details.append(d_out)
+                sec = d_out.get("sector", "Commodity")
+                sector_breakdown[sec] = sector_breakdown.get(sec, 0) + 1
+            except Exception:
+                d_out = {"symbol": sym, "price": None, "sector": "Commodity", "pe": None}
+                details.append(d_out)
+                sector_breakdown["Commodity"] = sector_breakdown.get("Commodity", 0) + 1
+            continue
+        sym_norm = _normalize_symbol_maybe(sym)
+        if not sym_norm:
+            continue
+        d = await _run_sync_with_timeout(get_stock_detail, sym_norm, timeout_s=10.0)
         if not isinstance(d, dict) or d.get("error"):
             continue
-        d_out = {"symbol": d.get("symbol") or sym, "price": d.get("price"), "sector": d.get("sector"), "pe": d.get("pe")}
+        d_out = {"symbol": d.get("symbol") or sym_norm, "price": d.get("price"), "sector": d.get("sector"), "pe": d.get("pe")}
         details.append(d_out)
         sec = (d_out.get("sector") or "N/A") if isinstance(d_out, dict) else "N/A"
         sector_breakdown[sec] = sector_breakdown.get(sec, 0) + 1
@@ -603,14 +2206,492 @@ async def handle_chat_query(
             {},
         )
 
-    # Portfolio allocation detection (highest priority when user pastes weights)
-    allocs = _extract_portfolio_allocations(q)
+    user_msg = q.lower().strip()
+
+    # HARDCODED CHECK 1 — Neutral macro scenario
+    NEUTRAL_PATTERNS = [
+        "all macro signals are neutral",
+        "signals are neutral",
+        "macro signals are neutral",
+        "all signals neutral",
+        "all signals are neutral",
+        "what if signals are neutral",
+        "what if all macro",
+        "neutral macro",
+        "signals neutral",
+        "macro neutral",
+    ]
+    if any(p in user_msg for p in NEUTRAL_PATTERNS):
+        from app.services.cross_market_service import get_cross_market_signals
+        from app.services.causality_engine import interpret_causality
+
+        sigs = get_cross_market_signals() or {}
+        causal = interpret_causality(sigs) if sigs else []
+        mapped = {
+            "bond_yield": sigs.get("us_10y_yield"),
+            "crude_oil": sigs.get("wti_crude"),
+            "usd_inr": sigs.get("usd_inr"),
+            "gold": sigs.get("gold"),
+            "india_vix": sigs.get("india_vix"),
+        }
+        return handle_neutral_macro_scenario(mapped, causal), {"last_intent": "macro_analysis"}
+
+    # HARDCODED CHECK 2 — Sector safety ranking
+    SECTOR_SAFETY_PATTERNS = [
+        "safest sector",
+        "safest sectors",
+        "sectors to invest",
+        "best sectors",
+        "which sectors are safe",
+        "sectors safe",
+        "where to invest",
+        "which sectors to buy",
+        "safe sectors",
+        "sectors right now",
+    ]
+    if any(p in user_msg for p in SECTOR_SAFETY_PATTERNS):
+        from app.services.cross_market_service import get_cross_market_signals
+        from app.services.causality_engine import interpret_causality
+
+        sigs = get_cross_market_signals() or {}
+        causal = interpret_causality(sigs) if sigs else []
+        mapped = {
+            "bond_yield": sigs.get("us_10y_yield"),
+            "crude_oil": sigs.get("wti_crude"),
+            "usd_inr": sigs.get("usd_inr"),
+            "gold": sigs.get("gold"),
+            "india_vix": sigs.get("india_vix"),
+        }
+        return handle_sector_safety_ranking(mapped, causal), {"last_intent": "macro_analysis"}
+
+    ql = q.lower()
+    raw_syms_for_early = get_raw_parser_symbols(q, context=ctx)
+
+    def _resolve_primary_symbol_early() -> Optional[str]:
+        if raw_syms_for_early:
+            return _normalize_symbol_maybe(raw_syms_for_early[0])
+        toks = re.findall(r"[A-Za-z]{2,12}", q)
+        for t in toks:
+            sym = _normalize_symbol_maybe(t)
+            if sym and (sym.endswith(".NS") or sym.endswith(".BO")):
+                return sym
+        return None
+
+    def _signal_key_from_text(text: str) -> str:
+        t = (text or "").lower()
+        if re.search(r"\b(interest rate|rates|rbi)\b", t):
+            return "us_10y_yield"
+        if re.search(r"\b(crude|oil)\b", t):
+            return "wti_crude"
+        if re.search(r"\b(rupee|currency|forex|usd)\b", t):
+            return "usd_inr"
+        if re.search(r"\b(volatility|fear|vix)\b", t):
+            return "india_vix"
+        if re.search(r"\b(gold|safe haven)\b", t):
+            return "gold"
+        return _detect_primary_macro_signal(text)
+
+    # Step 2/3 (strict): macro-driven stock analysis OR stock+signal questions route here before portfolio/comparison.
+    is_macro_driven_stock = bool(
+        re.search(r"\b(macro analysis of|macro-driven analysis of|macro outlook for|macro view on|macro-driven)\b", ql)
+    )
+    is_stock_signal_question = bool(
+        re.search(
+            r"\b(is\s+.+\b(good buy|a buy|worth buying|good investment|worth investing)\b.*\b(when|if)\b|"
+            r"(how does|impact of|effect of|what does).+\b(affect|impact|mean for)\b)\b",
+            ql,
+        )
+    )
+    if is_macro_driven_stock or is_stock_signal_question:
+        sym_norm_early = _resolve_primary_symbol_early()
+        if sym_norm_early:
+            from app.services.stock_service import get_stock_detail
+            from app.services.cross_market_service import get_cross_market_signals
+            from app.utils.datetime_utils import get_ist_timestamp
+
+            data_timestamp = get_ist_timestamp()
+            detail = await _run_sync_with_timeout(get_stock_detail, sym_norm_early, timeout_s=10.0) or {}
+            signals = get_cross_market_signals() or {}
+            clean = sym_norm_early.replace(".NS", "").replace(".BO", "")
+            sector = (detail or {}).get("sector") or "N/A"
+            price = (detail or {}).get("price")
+            price_str = f"Rs.{float(price):,.2f}" if isinstance(price, (int, float)) else "N/A"
+
+            if is_macro_driven_stock:
+                def _sig_row(key: str) -> Tuple[str, str, str, str]:
+                    s = signals.get(key) if isinstance(signals, dict) else None
+                    if not s or not isinstance(s, dict):
+                        return (_MACRO_LABELS.get(key, key), "N/A", "N/A", "LOW direct impact")
+                    cv = s.get("current_value")
+                    cp = s.get("change_pct")
+                    try:
+                        cv = float(cv) if cv is not None else None
+                        cp = float(cp) if cp is not None else None
+                    except Exception:
+                        cv, cp = None, None
+                    val = f"{cv:.2f}" if cv is not None else "N/A"
+                    chg = f"{cp:+.2f}%" if cp is not None else "N/A"
+                    # Simple sector-aware labels per spec examples
+                    base = clean.upper()
+                    if base == "RELIANCE":
+                        imp = {
+                            "wti_crude": "POSITIVE — revenue driver" if (cp or 0) > 0 else "NEGATIVE — price pressure",
+                            "usd_inr": "MIXED — retail/telecom",
+                            "us_10y_yield": "NEUTRAL (low impact)",
+                            "india_vix": "CAUTION — broad market",
+                            "gold": "LOW direct impact",
+                        }.get(key, "LOW impact")
+                    elif base == "ONGC":
+                        imp = {
+                            "wti_crude": "POSITIVE — direct revenue" if (cp or 0) > 0 else "NEGATIVE — realization risk",
+                            "usd_inr": "POSITIVE — USD revenues",
+                            "us_10y_yield": "LOW impact",
+                            "india_vix": "CAUTION",
+                            "gold": "LOW direct impact",
+                        }.get(key, "LOW impact")
+                    elif base in {"TCS", "INFY"}:
+                        imp = {
+                            "us_10y_yield": "NEGATIVE — discount rate",
+                            "usd_inr": "POSITIVE — export revenue",
+                            "india_vix": "CAUTION",
+                            "wti_crude": "LOW impact",
+                            "gold": "LOW impact",
+                        }.get(key, "LOW impact")
+                    elif base in {"HDFCBANK"}:
+                        imp = {
+                            "us_10y_yield": "POSITIVE — NIM expansion",
+                            "india_vix": "CAUTION — liquidity",
+                            "usd_inr": "LOW impact",
+                            "wti_crude": "LOW impact",
+                            "gold": "LOW impact",
+                        }.get(key, "LOW impact")
+                    else:
+                        imp = "LOW impact"
+                    return (_MACRO_LABELS.get(key, key), val, chg, imp)
+
+                rows = [_sig_row("wti_crude"), _sig_row("usd_inr"), _sig_row("us_10y_yield"), _sig_row("india_vix"), _sig_row("gold")]
+                lines = [
+                    f"**MACRO-DRIVEN STOCK ANALYSIS: {clean}**",
+                    "",
+                    f"**Current Price:** {price_str}",
+                    f"**Sector:** {sector}",
+                    "",
+                    f"**All Macro Signals vs {clean}:**",
+                    "",
+                    f"| Signal | Value | Change | Impact on {clean} |",
+                    "|--------|-------|--------|---------------------------|",
+                ]
+                for sig, val, chg, imp in rows:
+                    lines.append(f"| {sig} | {val} | {chg} | {imp} |")
+                net = "Neutral"
+                if any("POSITIVE" in r[3] for r in rows[:2]):
+                    net = "Positive"
+                if any("NEGATIVE" in r[3] for r in rows):
+                    net = "Negative"
+                lines.extend([
+                    "",
+                    f"**Net Macro Score for {clean}:** {net}",
+                    "",
+                    "**Conclusion:**",
+                    "This combines live macro signals with sector sensitivity. Use it as context for risk sizing and stock selection.",
+                    "",
+                    f"**Data as of:** {data_timestamp}",
+                ])
+                return _chat_response({"source": "stock_analysis", "result": {"symbol": sym_norm_early}, "message": "\n".join(lines), "query": q}, {"last_symbol": sym_norm_early, "last_intent": "stock_analysis"})
+
+            # Stock-signal / good-buy-when format (stock + relevant macro signal)
+            signal_key = _signal_key_from_text(q)
+            sig = (signals or {}).get(signal_key) if isinstance(signals, dict) else None
+            sig_val = "N/A"
+            sig_chg = "N/A"
+            sig_dir = None
+            if isinstance(sig, dict):
+                try:
+                    sig_val = f"{float(sig.get('current_value')):.2f}"
+                    sig_chg = f"{float(sig.get('change_pct') or 0):+.2f}%"
+                    sig_dir = sig.get("direction") or ("up" if float(sig.get("change_pct") or 0) > 0 else "down" if float(sig.get("change_pct") or 0) < 0 else "flat")
+                except Exception:
+                    pass
+
+            def _other_signal_line(key: str) -> Optional[str]:
+                s2 = (signals or {}).get(key) if isinstance(signals, dict) else None
+                if not isinstance(s2, dict) or s2.get("current_value") is None:
+                    return None
+                try:
+                    cv2 = float(s2.get("current_value"))
+                    cp2 = float(s2.get("change_pct") or 0)
+                except Exception:
+                    return None
+                impact = "sector impact"
+                if sector and "technology" in str(sector).lower():
+                    if key == "usd_inr":
+                        impact = "export revenue tailwind" if cp2 > 0 else "export revenue headwind" if cp2 < 0 else "neutral"
+                    if key == "us_10y_yield":
+                        impact = "valuation headwind" if cp2 > 0 else "valuation tailwind" if cp2 < 0 else "neutral — no pressure"
+                    if key == "wti_crude":
+                        impact = "low direct impact on IT"
+                if sector and "financial" in str(sector).lower():
+                    if key == "us_10y_yield":
+                        impact = "NIM expansion positive" if cp2 > 0 else "NIM compression risk" if cp2 < 0 else "stable margin outlook"
+                    if key == "india_vix":
+                        impact = "elevated fear — reduce size" if cv2 >= 20 and cp2 > 0 else "fear easing — cautious entry" if cv2 >= 20 and cp2 < 0 else "calm market — normal sizing"
+                    if key == "usd_inr":
+                        impact = "low direct impact on domestic bank"
+                return f"• {_MACRO_LABELS.get(key, key)} {cv2:.2f} ({cp2:+.2f}%) — {impact}"
+
+            # Stock-signal narratives (3–4 sentences) with provided templates
+            narrative = None
+            base = clean.upper()
+            if base == "HDFCBANK" and signal_key == "us_10y_yield":
+                narrative = (
+                    f"Rising interest rates expand HDFC Bank's Net Interest Margin (NIM) as lending rates reprice faster than "
+                    f"deposit costs. However very high rates can slow loan growth and increase NPAs. "
+                    f"Current yield at {sig_val} with flat movement suggests a stable rate environment — "
+                    f"neutral to mildly positive for HDFC Bank's margins."
+                )
+            if base == "HDFCBANK" and signal_key == "india_vix":
+                narrative = (
+                    "High VIX signals market fear which can trigger FII outflows from banking stocks. "
+                    "HDFC Bank as a large-cap bank is typically sold first in risk-off environments. "
+                    "Current VIX above 20 warrants caution on position sizing."
+                )
+            if base == "ONGC" and signal_key == "wti_crude":
+                narrative = (
+                    "Rising crude is directly positive for ONGC as an upstream oil producer. "
+                    "Higher crude prices increase revenue realization per barrel produced. "
+                    "At $84 crude is above ONGC's breakeven, supporting strong cash flows. "
+                    "Watch for government windfall tax risk above $90."
+                )
+            if base == "TCS" and signal_key == "wti_crude":
+                narrative = (
+                    "Crude oil has minimal direct impact on TCS as an IT services company with low physical input costs. "
+                    "However rising crude increases inflation risk which can lead to rate hikes, indirectly pressuring IT growth valuations. "
+                    f"Current crude at {sig_val} with {sig_chg} is a low indirect risk."
+                )
+            if base in {"TCS", "INFY"} and signal_key == "us_10y_yield":
+                pe_txt = f"{(detail or {}).get('pe')}" if (detail or {}).get("pe") is not None else "N/A"
+                narrative = (
+                    "Rising US bond yields increase the discount rate on future earnings, compressing valuations of high-PE growth stocks like IT companies. "
+                    f"{base} at P/E {pe_txt} is relatively protected versus higher-PE peers. "
+                    "Flat yield today is neutral — no incremental valuation pressure."
+                )
+            if base in {"TCS", "INFY"} and signal_key == "usd_inr":
+                narrative = (
+                    "Weaker INR directly benefits IT exporters like TCS as USD revenues convert to more rupees. "
+                    f"Current INR at {sig_val}, {sig_chg} today provides a mild export tailwind. "
+                    "Each 1% INR depreciation adds roughly 0.3-0.5% to IT company operating margins."
+                )
+            if base == "RELIANCE" and signal_key == "wti_crude":
+                narrative = (
+                    "Crude oil has a complex dual impact on Reliance. "
+                    "Rising crude benefits the upstream O&G and refining segments but increases costs for the petrochemicals business. "
+                    "Net impact is mildly positive at current levels as refining margins tend to expand with crude."
+                )
+            if not narrative:
+                narrative = (
+                    f"This macro signal influences {sector} mainly through funding costs, demand conditions, and investor risk appetite. "
+                    f"With {_MACRO_LABELS.get(signal_key, signal_key)} {('rising' if sig_dir == 'up' else 'falling' if sig_dir == 'down' else 'flat')} today, "
+                    "the near-term effect is mostly on sentiment and valuation rather than immediate earnings. "
+                    "Use staggered entries and size positions based on volatility."
+                )
+
+            # Pick top 2 other relevant signals by sector
+            sector_low = str(sector or "").lower()
+            relevance = []
+            if "technology" in sector_low or base in {"TCS", "INFY"}:
+                relevance = ["usd_inr", "us_10y_yield", "india_vix", "wti_crude", "gold"]
+            elif "financial" in sector_low or "bank" in sector_low or base == "HDFCBANK":
+                relevance = ["us_10y_yield", "india_vix", "usd_inr", "gold", "wti_crude"]
+            elif "energy" in sector_low or base in {"RELIANCE", "ONGC"}:
+                relevance = ["wti_crude", "usd_inr", "india_vix", "us_10y_yield", "gold"]
+            else:
+                relevance = ["india_vix", "usd_inr", "us_10y_yield", "wti_crude", "gold"]
+
+            lines = [
+                f"**STOCK-MACRO ANALYSIS: {clean}**",
+                "",
+                f"**Current Price:** {price_str}",
+                f"**Sector:** {sector}",
+                "",
+                f"**Relevant Macro Signal: {_MACRO_LABELS.get(signal_key, signal_key)}**",
+                f"**Current Value:** {sig_val} ({sig_chg})",
+                "",
+            ]
+            lines.extend([f"**How {_MACRO_LABELS.get(signal_key, signal_key)} Affects {clean}:**", narrative, ""])
+
+            lines.append("**Other Relevant Signals:**")
+            added = 0
+            for k in relevance:
+                if k == signal_key:
+                    continue
+                line = _other_signal_line(k)
+                if line:
+                    lines.append(line)
+                    added += 1
+                if added >= 2:
+                    break
+
+            # Actionable overall view
+            stance = "HOLD"
+            if signal_key in {"usd_inr"} and (sig_dir == "up") and ("technology" in sector_low or base in {"TCS", "INFY"}):
+                stance = "BUY (selective)"
+            if signal_key in {"us_10y_yield"} and sig_dir == "up" and ("technology" in sector_low):
+                stance = "AVOID / WAIT"
+            if signal_key == "india_vix" and sig and isinstance(sig, dict):
+                try:
+                    if float(sig.get("current_value") or 0) >= 20 and float(sig.get("change_pct") or 0) > 0:
+                        stance = "AVOID / REDUCE SIZE"
+                except Exception:
+                    pass
+
+            lines.extend([
+                "",
+                "**Overall View:**",
+                f"Based on the primary signal and today’s direction, the near-term stance for {clean} is **{stance}**. "
+                "If signals are supportive, accumulate gradually; if adverse, wait for better entries and keep position sizes conservative.",
+                "",
+                f"**Data as of:** {data_timestamp}",
+            ])
+            return _chat_response({"source": "stock_analysis", "result": {"symbol": sym_norm_early}, "message": "\n".join(lines), "query": q}, {"last_symbol": sym_norm_early, "last_intent": "stock_analysis"})
+
+    # Portfolio question with listed holdings but no weights -> assume equal weights (do not prompt)
+    if (("my portfolio" in ql) or ("analyze portfolio" in ql) or ("analyse portfolio" in ql)) and not re.search(r"\d+\s*%", ql):
+        # Resolve up to 10 explicit symbols from query tokens
+        tokens = get_raw_parser_symbols(q, context=ctx)
+        resolved: List[str] = []
+        seen = set()
+        for t in tokens:
+            s = _normalize_symbol_maybe(t)
+            if s and s not in seen:
+                seen.add(s)
+                resolved.append(s)
+        if len(resolved) >= 2:
+            equal = round(100.0 / len(resolved), 2)
+            allocs_eq = [{"symbol": s, "weight_percent": equal} for s in resolved]
+            portfolio_result = await _portfolio_allocation_analysis(allocs_eq)
+            if isinstance(portfolio_result, dict) and not portfolio_result.get("error"):
+                # Direction-aware macro overlay (recomputed below in allocs path too; keep here for this branch)
+                macro_overlay: List[str] = []
+                try:
+                    from app.services.cross_market_service import get_cross_market_signals
+                    sigs = get_cross_market_signals() or {}
+
+                    # Determine portfolio composition
+                    stocks = portfolio_result.get("stocks") or []
+                    sectors = [str(s.get("sector") or "").lower() for s in stocks if isinstance(s, dict)]
+                    has_it = any("technology" in x or "it" == x for x in sectors)
+                    has_energy = any("energy" in x for x in sectors) or any(s.get("symbol") in {"ONGC.NS", "RELIANCE.NS"} for s in stocks if isinstance(s, dict))
+                    has_banking = any("financial" in x or "bank" in x for x in sectors)
+
+                    # Crude Oil overlay
+                    c_cv, c_cp, c_dir = _get_sig(sigs, "wti_crude")
+                    if c_cp is not None:
+                        if c_dir == "up" and has_energy:
+                            macro_overlay.append(f"Crude up {c_cp:+.2f}% — POSITIVE for ONGC/energy holdings. Revenue realization improves.")
+                        elif c_dir == "up" and has_it and not has_energy:
+                            macro_overlay.append(f"Crude up {c_cp:+.2f}% — LOW direct IT impact. Watch inflation risk indirectly.")
+                        elif c_dir == "down":
+                            macro_overlay.append(f"Crude down {c_cp:+.2f}% — margin relief for aviation/logistics. Energy stock revenues soften.")
+
+                    # Bond Yield overlay
+                    y_cv, y_cp, y_dir = _get_sig(sigs, "us_10y_yield")
+                    if y_cp is not None:
+                        if abs(y_cp) < 0.01:
+                            macro_overlay.append("Yield flat — neutral, no incremental pressure.")
+                        elif y_dir == "up" and has_it:
+                            macro_overlay.append(f"Yield up {y_cp:+.2f}% — valuation headwind for TCS/INFY. Growth stock discount rates rise.")
+                        elif y_dir == "up" and has_banking:
+                            macro_overlay.append(f"Yield up {y_cp:+.2f}% — NIM expansion positive for banking holdings.")
+
+                    # India VIX overlay
+                    v_cv, v_cp, v_dir = _get_sig(sigs, "india_vix")
+                    if v_cv is not None and v_cp is not None:
+                        if v_cv >= 20 and v_cp > 0:
+                            macro_overlay.append(f"VIX at {v_cv:.2f}, up {v_cp:+.2f}% — elevated fear. Consider reducing position sizes in volatile names.")
+                        elif v_cv >= 20 and v_cp < 0:
+                            macro_overlay.append(f"VIX at {v_cv:.2f}, easing — fear reducing. Cautious re-entry opportunity forming.")
+                        elif v_cv < 20:
+                            macro_overlay.append(f"VIX at {v_cv:.2f} — calm market. Normal position sizing appropriate.")
+                except Exception:
+                    pass
+
+                msg = _format_portfolio_analysis(
+                    portfolio_result.get("stocks") or [],
+                    portfolio_result.get("allocations") or [],
+                    portfolio_result.get("sector_breakdown") or {},
+                    float(portfolio_result.get("diversification_score", 0)),
+                    str(portfolio_result.get("risk_level", "Low")),
+                    "Equal weights assumed (no weights provided). " + str(portfolio_result.get("suggestions", "")),
+                    macro_overlay,
+                )
+                return _chat_response(
+                    {"source": "portfolio_analysis", "result": portfolio_result, "message": msg, "query": q},
+                    {"last_intent": "portfolio_analysis", "last_portfolio_allocations": allocs_eq},
+                )
+
+    # Hypothetical macro check BEFORE portfolio — never route to portfolio
+    if is_hypothetical_macro_query(q):
+        allocs = []
+    else:
+        allocs = _extract_portfolio_allocations(q)
     if allocs:
         portfolio_result = await _portfolio_allocation_analysis(allocs)
         if isinstance(portfolio_result, dict) and portfolio_result.get("error"):
             return _chat_response({"source": "portfolio_analysis", "result": portfolio_result, "query": q}, {})
+        # Direction-aware Macro Risk Overlay (Live)
+        macro_overlay: List[str] = []
+        try:
+            from app.services.cross_market_service import get_cross_market_signals
+            sigs = get_cross_market_signals() or {}
+
+            stocks = portfolio_result.get("stocks") or []
+            sectors = [str(s.get("sector") or "").lower() for s in stocks if isinstance(s, dict)]
+            has_it = any("technology" in x or x == "it" for x in sectors) or any(s.get("symbol", "").endswith(("TCS.NS", "INFY.NS")) for s in stocks if isinstance(s, dict))
+            has_energy = any("energy" in x for x in sectors) or any(str(s.get("symbol") or "").upper() in {"ONGC.NS", "RELIANCE.NS"} for s in stocks if isinstance(s, dict))
+            has_banking = any("financial" in x or "bank" in x for x in sectors)
+
+            # Crude Oil
+            c_cv, c_cp, c_dir = _get_sig(sigs, "wti_crude")
+            if c_cp is not None:
+                if c_dir == "up" and has_energy:
+                    macro_overlay.append(f"Crude up {c_cp:+.2f}% — POSITIVE for ONGC/energy holdings. Revenue realization improves.")
+                elif c_dir == "up" and has_it and not has_energy:
+                    macro_overlay.append(f"Crude up {c_cp:+.2f}% — LOW direct IT impact. Watch inflation risk indirectly.")
+                elif c_dir == "down":
+                    macro_overlay.append(f"Crude down {c_cp:+.2f}% — margin relief for aviation/logistics. Energy stock revenues soften.")
+
+            # Bond Yield
+            y_cv, y_cp, y_dir = _get_sig(sigs, "us_10y_yield")
+            if y_cp is not None:
+                if abs(y_cp) < 0.01:
+                    macro_overlay.append("Yield flat — neutral, no incremental pressure.")
+                elif y_dir == "up" and has_it:
+                    macro_overlay.append(f"Yield up {y_cp:+.2f}% — valuation headwind for TCS/INFY. Growth stock discount rates rise.")
+                elif y_dir == "up" and has_banking:
+                    macro_overlay.append(f"Yield up {y_cp:+.2f}% — NIM expansion positive for banking holdings.")
+
+            # India VIX
+            v_cv, v_cp, v_dir = _get_sig(sigs, "india_vix")
+            if v_cv is not None and v_cp is not None:
+                if v_cv >= 20 and v_cp > 0:
+                    macro_overlay.append(f"VIX at {v_cv:.2f}, up {v_cp:+.2f}% — elevated fear. Consider reducing position sizes in volatile names.")
+                elif v_cv >= 20 and v_cp < 0:
+                    macro_overlay.append(f"VIX at {v_cv:.2f}, easing — fear reducing. Cautious re-entry opportunity forming.")
+                elif v_cv < 20:
+                    macro_overlay.append(f"VIX at {v_cv:.2f} — calm market. Normal position sizing appropriate.")
+        except Exception:
+            pass
+        msg = _format_portfolio_analysis(
+            portfolio_result.get("stocks") or [],
+            portfolio_result.get("allocations") or [],
+            portfolio_result.get("sector_breakdown") or {},
+            float(portfolio_result.get("diversification_score", 0)),
+            str(portfolio_result.get("risk_level", "Low")),
+            str(portfolio_result.get("suggestions", "")),
+            macro_overlay,
+        )
         return _chat_response(
-            {"source": "portfolio_analysis", "result": portfolio_result, "query": q},
+            {"source": "portfolio_analysis", "result": portfolio_result, "message": msg, "query": q},
             {"last_intent": "portfolio_analysis", "last_portfolio_allocations": allocs},
         )
 
@@ -663,6 +2744,43 @@ async def handle_chat_query(
     last_portfolio_allocs = ctx.get("last_portfolio_allocations") if isinstance(ctx.get("last_portfolio_allocations"), list) else None
 
     # ---- Routing ----
+
+    # Cross-market macro analysis (bond yields, oil, FX, gold, India VIX)
+    # Standard format: MACRO SIGNAL ANALYSIS block (no raw data dump)
+    if intent in {"macro_analysis", "cross_market_impact"}:
+        from app.services.cross_market_service import get_cross_market_signals
+        from app.services.causality_engine import interpret_causality
+        from app.utils.datetime_utils import get_ist_timestamp
+
+        data_timestamp = get_ist_timestamp()
+        signals = get_cross_market_signals() or {}
+        causal_insights = interpret_causality(signals) if signals else []
+
+        sector_macro = _detect_sector_macro_query(q)
+        if sector_macro:
+            message = _format_sector_macro_analysis(signals, sector_macro, data_timestamp)
+        elif _is_neutral_macro_education(q):
+            message = _format_neutral_macro_scenario(signals, data_timestamp)
+        elif _is_sector_safety_query(q):
+            message = _format_sector_safety_ranking(signals, data_timestamp)
+        elif _is_hypothetical_macro_question(q):
+            scenario = _detect_hypothetical_scenario(q)
+            if scenario:
+                message = _format_hypothetical_macro_analysis(signals, q, scenario, data_timestamp)
+            else:
+                message = _format_macro_signal_analysis(signals, causal_insights, data_timestamp, q)
+        else:
+            message = _format_macro_signal_analysis(signals, causal_insights, data_timestamp, q)
+
+        return _chat_response(
+            {
+                "source": "macro",
+                "result": {"signals": signals, "causal_insights": causal_insights, "data_timestamp": data_timestamp},
+                "message": message,
+                "query": q,
+            },
+            {"last_intent": intent},
+        )
 
     # Growth potential comparison (uses AI prediction + simple momentum)
     if intent == "growth_comparison":
@@ -897,13 +3015,22 @@ async def handle_chat_query(
     # comparison (valuation/dividend style)
     if intent == "comparison":
         try:
-            # Use only explicitly detected symbols; for follow-ups with no symbols, reuse previous set.
-            compare_syms = list(symbols) if symbols else []
+            # Use dedicated comparison symbol extractor; for follow-ups with no symbols, reuse previous set.
+            compare_syms = _extract_comparison_symbols_from_query(q)
+            if not compare_syms:
+                compare_syms = list(symbols) if symbols else []
             if not compare_syms and last_symbols:
                 compare_syms = list(last_symbols)
             if len(compare_syms) < 2:
                 return (
-                    {"message": "Please provide at least two stocks to compare. Example: Compare TCS INFY and RELIANCE."},
+                    {
+                        "message": (
+                            "I couldn't identify the stocks in your message. Try:\n"
+                            "• compare TCS and INFY\n"
+                            "• TCS vs HDFC vs RELIANCE\n"
+                            "• compare tcs infy wipro"
+                        )
+                    },
                     {},
                 )
             # Resolve all to .NS/.BO; never use unresolved tokens
@@ -914,33 +3041,19 @@ async def handle_chat_query(
                     resolved_syms.append(rs)
             if len(resolved_syms) < 2:
                 return (
-                    {"message": "I could not identify at least two valid stock symbols. Please specify the companies clearly."},
+                    {
+                        "message": (
+                            "I couldn't identify the stocks in your message. Try:\n"
+                            "• compare TCS and INFY\n"
+                            "• TCS vs HDFC vs RELIANCE\n"
+                            "• compare tcs infy wipro"
+                        )
+                    },
                     {},
                 )
 
-            # If exactly two, preserve existing detailed pairwise structure for compatibility.
-            if len(resolved_syms) == 2:
-                comp = await _comparison_result(resolved_syms)
-                if comp:
-                    return _chat_response(
-                        {"source": "compare_stocks", "result": comp, "query": q},
-                        {
-                            "last_symbols": [comp.get("symbol1"), comp.get("symbol2")],
-                            "last_symbol": comp.get("symbol1"),
-                            "last_intent": "comparison",
-                        },
-                    )
-                return _chat_response(
-                    {
-                        "source": "compare_stocks",
-                        "result": {"error": "Unable to fetch comparison data for one or both symbols."},
-                        "query": q,
-                    },
-                    {"last_intent": "comparison"},
-                )
-
-            # Multi-stock comparison (3+)
-            multi = await _multi_comparison_result(resolved_syms)
+            # Multi-stock comparison (2+)
+            multi = await _multi_comparison_result(resolved_syms[:6])
             if not isinstance(multi, dict):
                 return _chat_response(
                     {
@@ -955,13 +3068,33 @@ async def handle_chat_query(
             rows = multi.get("rows") or []
             if len(rows) < 2:
                 return (
-                    {"message": "Please provide at least two valid stocks to compare."},
+                    {
+                        "message": (
+                            "I couldn't identify the stocks in your message. Try:\n"
+                            "• compare TCS and INFY\n"
+                            "• TCS vs HDFC vs RELIANCE\n"
+                            "• compare tcs infy wipro"
+                        )
+                    },
                     {},
                 )
 
-            def _fmt_price(x: Any) -> str:
+            # Build markdown table
+            headers = [str(r.get("name") or r.get("symbol") or "").replace(".NS", "").replace(".BO", "") for r in rows]
+
+            def _fmt_price_inr(x: Any) -> str:
+                if isinstance(x, str) and x.startswith("Rs."):
+                    return x
                 try:
-                    return f"₹{float(x):,.2f}"
+                    return f"Rs.{float(x):,.2f}"
+                except Exception:
+                    return "N/A"
+
+            def _fmt_price_usd(x: Any) -> str:
+                if isinstance(x, str) and x.startswith("$"):
+                    return x
+                try:
+                    return f"${float(x):,.2f}"
                 except Exception:
                     return "N/A"
 
@@ -973,35 +3106,191 @@ async def handle_chat_query(
 
             def _fmt_div(x: Any) -> str:
                 try:
-                    return f"{float(x):.1f}%"
+                    return f"{float(x):.2f}%"
                 except Exception:
                     return "N/A"
 
-            header = f"{'Stock':<12} {'Price':>10} {'P/E':>8} {'Dividend':>10} {'Sector':<20}"
-            sep = "-" * len(header)
+            def format_market_cap(raw_value):
+                if not raw_value:
+                    return "N/A"
+                crores = float(raw_value) / 10_000_000
+                if crores >= 1_00_000:
+                    return f"{round(crores / 1_00_000, 2)} L Cr"
+                elif crores >= 1_000:
+                    return f"{round(crores, 0):.0f} Cr"
+                else:
+                    return f"{round(crores, 2)} Cr"
+
+            def _fmt_mc(x: Any) -> str:
+                if not x or str(x).upper() == "N/A":
+                    return "N/A"
+                # x may be raw numeric market cap; always format to Cr/L Cr
+                try:
+                    return format_market_cap(float(x))
+                except Exception:
+                    return str(x)
+
+            def _fmt_change(x: Any) -> str:
+                try:
+                    v = float(x)
+                except Exception:
+                    return "N/A"
+                sign = "+" if v >= 0 else ""
+                return f"{sign}{v:.2f}%"
+
             lines: List[str] = []
-            lines.append("Stock Comparison")
+            header_row = "| Metric         | " + " | ".join(h for h in headers) + " |"
+            sep_row = "|----------------| " + " | ".join(["------------"] * len(headers)) + " |"
+            lines.append(header_row)
+            lines.append(sep_row)
+
+            def _row(metric: str, values: List[str]) -> None:
+                lines.append("| " + metric.ljust(14) + " | " + " | ".join(values) + " |")
+
+            has_commodity = any((r.get("assetType") == "Commodity") for r in rows)
+            has_stock = any((r.get("assetType") != "Commodity") for r in rows)
+
+            if has_commodity and not has_stock:
+                # Pure commodity / crypto comparison: show USD and time-horizon changes.
+                _row("Price (USD)", [_fmt_price_usd(r.get("price")) for r in rows])
+                _row("52W High", [_fmt_price_usd(r.get("high_52w")) for r in rows])
+                _row("52W Low", [_fmt_price_usd(r.get("low_52w")) for r in rows])
+                _row("Today Change", [_fmt_change(r.get("todayChange")) for r in rows])
+                _row("1M Change", [_fmt_change(r.get("change1m")) for r in rows])
+                _row("3M Change", [_fmt_change(r.get("change3m")) for r in rows])
+                _row("YTD Change", [_fmt_change(r.get("changeYtd")) for r in rows])
+                _row("Asset Type", [str(r.get("assetType") or "Commodity") for r in rows])
+            elif has_commodity and has_stock:
+                # Mixed stocks + commodities: shared price-based metrics only.
+                def _price_mixed(row: Dict[str, Any]) -> str:
+                    if row.get("assetType") == "Commodity":
+                        return _fmt_price_usd(row.get("price"))
+                    return _fmt_price_inr(row.get("price"))
+
+                def _price_52w_mixed(row: Dict[str, Any], key: str) -> str:
+                    if row.get("assetType") == "Commodity":
+                        return _fmt_price_usd(row.get(key))
+                    return _fmt_price_inr(row.get(key))
+
+                _row("Price", [_price_mixed(r) for r in rows])
+                _row("52W High", [_price_52w_mixed(r, "high_52w") for r in rows])
+                _row("52W Low", [_price_52w_mixed(r, "low_52w") for r in rows])
+                _row("Today Change", [_fmt_change(r.get("todayChange")) for r in rows])
+            else:
+                # Stock-only comparison (existing behaviour).
+                _row("Price", [_fmt_price_inr(r.get("price")) for r in rows])
+                _row("P/E Ratio", [_fmt_pe(r.get("pe")) for r in rows])
+                _row("Dividend Yield", [_fmt_div(r.get("dividendYield")) for r in rows])
+                _row("Market Cap", [_fmt_mc(r.get("marketCap")) for r in rows])
+                _row("52W High", [_fmt_price_inr(r.get("high_52w")) for r in rows])
+                _row("52W Low", [_fmt_price_inr(r.get("low_52w")) for r in rows])
+                _row("Sector", [str(r.get("sector") or "N/A") for r in rows])
+                _row("Today Change", [_fmt_change(r.get("todayChange")) for r in rows])
+
+            leaders = multi.get("leaders") or {}
+            val_leader = leaders.get("valuation_leader")
+            inc_leader = leaders.get("income_leader")
+            size_leader = leaders.get("size_leader")
+            mom_leader = leaders.get("momentum_leader")
+            best_today = leaders.get("best_today")
+            best_1m = leaders.get("best_1m")
+            best_3m = leaders.get("best_3m")
+            overall_trend_text = leaders.get("overall_trend_text")
+            has_commodity = bool(multi.get("has_commodity"))
+            has_stock = bool(multi.get("has_stock"))
+
+            def _name_or_na(row: Optional[Dict[str, Any]]) -> str:
+                if not isinstance(row, dict):
+                    return "N/A"
+                return str(row.get("name") or row.get("symbol") or "N/A").replace(".NS", "").replace(".BO", "")
+
             lines.append("")
-            lines.append(header)
-            lines.append(sep)
-            for r in rows:
-                name = str(r.get("name") or r.get("symbol") or "")[:12]
-                price = _fmt_price(r.get("price"))
-                pe = _fmt_pe(r.get("pe"))
-                dy = _fmt_div(r.get("dividendYield"))
-                sector = str(r.get("sector") or "")[:20]
-                lines.append(f"{name:<12} {price:>10} {pe:>8} {dy:>10} {sector:<20}")
 
-            interp = multi.get("interpretation") or []
-            if interp:
-                lines.extend(["", "Interpretation:"] + [f"• {x}" for x in interp])
+            if has_commodity:
+                # Commodity / mixed comparison winners
+                if best_today:
+                    lines.append(f"Best Performer (Today)  : {_name_or_na(best_today)}")
+                else:
+                    lines.append("Best Performer (Today)  : N/A")
+                if best_1m:
+                    lines.append(f"Best Performer (1 Month): {_name_or_na(best_1m)}")
+                else:
+                    lines.append("Best Performer (1 Month): N/A")
+                if best_3m:
+                    lines.append(f"Best Performer (3 Month): {_name_or_na(best_3m)}")
+                else:
+                    lines.append("Best Performer (3 Month): N/A")
 
-            concl = multi.get("conclusion") or []
-            if concl:
-                lines.extend(["", "Conclusion:"] + concl)
+                trend_text = overall_trend_text or "Macro context for commodities and related sectors looks broadly neutral based on current cross-market signals."
+                lines.append(f"Overall Trend           : {trend_text}")
 
-            lines.append("")
-            lines.append("Use this as a high-level comparison of valuation, income, and size only; always combine with your own research and risk profile.")
+                if has_stock:
+                    lines.append("")
+                    lines.append(
+                        "Note: Direct comparison between stocks and commodities is limited. Metrics shown are price-based only."
+                    )
+            else:
+                # Stock-only winners (existing behaviour)
+                lines.append(f"Valuation Winner : {_name_or_na(val_leader)}")
+                lines.append(f"Income Winner    : {_name_or_na(inc_leader)}")
+                lines.append(f"Size Winner      : {_name_or_na(size_leader)}")
+                if mom_leader:
+                    lines.append(f"Today Winner     : {_name_or_na(mom_leader)}")
+                else:
+                    lines.append("Today Winner     : Could not fetch intraday data")
+
+                # Overall pick with macro-aware summary (best-effort)
+                overall_pick_row = val_leader or mom_leader or size_leader or inc_leader
+                overall_pick = _name_or_na(overall_pick_row)
+                try:
+                    from app.services.cross_market_service import get_cross_market_signals
+
+                    sigs = get_cross_market_signals() or {}
+                    us10 = sigs.get("us_10y_yield") or {}
+                    vix = sigs.get("india_vix") or {}
+                    parts: List[str] = []
+                    if isinstance(us10, dict) and us10.get("current_value") is not None:
+                        parts.append(
+                            f"US 10Y bond yield is around {float(us10['current_value']):.2f}, "
+                            f"{'up' if (us10.get('change_pct') or 0) > 0 else 'down' if (us10.get('change_pct') or 0) < 0 else 'flat'} "
+                            f"{abs(float(us10.get('change_pct') or 0)):.2f}% today."
+                        )
+                    if isinstance(vix, dict) and vix.get("current_value") is not None:
+                        parts.append(
+                            f"India VIX is near {float(vix['current_value']):.2f}, "
+                            f"indicating {'calmer' if (vix.get('change_pct') or 0) < 0 else 'elevated'} risk sentiment."
+                        )
+                    macro_text = (
+                        " ".join(parts)
+                        if parts
+                        else "Macro conditions look broadly neutral; treat this as a relative comparison, not a timing signal."
+                    )
+                except Exception:
+                    macro_text = "Macro signals are unavailable right now; treat this as a relative comparison based on valuation, income, and recent moves."
+
+                overall_sentence_parts: List[str] = []
+                if isinstance(size_leader, dict):
+                    mc_disp = size_leader.get("market_cap_display") or size_leader.get("marketCap")
+                    overall_sentence_parts.append(
+                        f"{_name_or_na(size_leader)} leads on market cap ({mc_disp})."
+                    )
+                if isinstance(val_leader, dict) and isinstance(inc_leader, dict):
+                    overall_sentence_parts.append(
+                        f"{_name_or_na(val_leader)} looks strongest on valuation (P/E {val_leader.get('pe')}), "
+                        f"while {_name_or_na(inc_leader)} offers the best income profile (yield {inc_leader.get('dividendYield')})."
+                    )
+                elif isinstance(val_leader, dict):
+                    overall_sentence_parts.append(
+                        f"{_name_or_na(val_leader)} looks strongest on valuation among the compared stocks."
+                    )
+                elif isinstance(inc_leader, dict):
+                    overall_sentence_parts.append(
+                        f"{_name_or_na(inc_leader)} offers the best income profile based on dividend yield."
+                    )
+                overall_sentence_parts.append(macro_text)
+                overall_sentence = " ".join(overall_sentence_parts)
+
+                lines.append(f"Overall Pick     : {overall_pick} – {overall_sentence}")
 
             # Track last_symbols for follow-up questions
             last_syms_ctx = [str(r.get("symbol") or "") for r in rows if r.get("symbol")]
@@ -1709,7 +3998,59 @@ async def handle_chat_query(
     # Portfolio analysis (keyword without pasted weights)
     if intent in {"portfolio_analysis", "portfolio_rebalance"} and last_portfolio_allocs:
         portfolio_result = await _portfolio_allocation_analysis(last_portfolio_allocs)
-        return _chat_response({"source": "portfolio_analysis", "result": portfolio_result, "query": q}, {"last_intent": intent})
+        if isinstance(portfolio_result, dict) and not portfolio_result.get("error"):
+            macro_overlay_po: List[str] = []
+            try:
+                from app.services.cross_market_service import get_cross_market_signals
+                sigs = get_cross_market_signals() or {}
+                stocks = portfolio_result.get("stocks") or []
+                sectors = [str(s.get("sector") or "").lower() for s in stocks if isinstance(s, dict)]
+                has_it = any("technology" in x or x == "it" for x in sectors)
+                has_energy = any("energy" in x for x in sectors) or any(str(s.get("symbol") or "").upper() in {"ONGC.NS", "RELIANCE.NS"} for s in stocks if isinstance(s, dict))
+                has_banking = any("financial" in x or "bank" in x for x in sectors)
+
+                c_cv, c_cp, c_dir = _get_sig(sigs, "wti_crude")
+                if c_cp is not None:
+                    if c_dir == "up" and has_energy:
+                        macro_overlay_po.append(f"Crude up {c_cp:+.2f}% — POSITIVE for ONGC/energy holdings. Revenue realization improves.")
+                    elif c_dir == "up" and has_it and not has_energy:
+                        macro_overlay_po.append(f"Crude up {c_cp:+.2f}% — LOW direct IT impact. Watch inflation risk indirectly.")
+                    elif c_dir == "down":
+                        macro_overlay_po.append(f"Crude down {c_cp:+.2f}% — margin relief for aviation/logistics. Energy stock revenues soften.")
+
+                y_cv, y_cp, y_dir = _get_sig(sigs, "us_10y_yield")
+                if y_cp is not None:
+                    if abs(y_cp) < 0.01:
+                        macro_overlay_po.append("Yield flat — neutral, no incremental pressure.")
+                    elif y_dir == "up" and has_it:
+                        macro_overlay_po.append(f"Yield up {y_cp:+.2f}% — valuation headwind for TCS/INFY. Growth stock discount rates rise.")
+                    elif y_dir == "up" and has_banking:
+                        macro_overlay_po.append(f"Yield up {y_cp:+.2f}% — NIM expansion positive for banking holdings.")
+
+                v_cv, v_cp, v_dir = _get_sig(sigs, "india_vix")
+                if v_cv is not None and v_cp is not None:
+                    if v_cv >= 20 and v_cp > 0:
+                        macro_overlay_po.append(f"VIX at {v_cv:.2f}, up {v_cp:+.2f}% — elevated fear. Consider reducing position sizes in volatile names.")
+                    elif v_cv >= 20 and v_cp < 0:
+                        macro_overlay_po.append(f"VIX at {v_cv:.2f}, easing — fear reducing. Cautious re-entry opportunity forming.")
+                    elif v_cv < 20:
+                        macro_overlay_po.append(f"VIX at {v_cv:.2f} — calm market. Normal position sizing appropriate.")
+            except Exception:
+                pass
+            msg_po = _format_portfolio_analysis(
+                portfolio_result.get("stocks") or [],
+                portfolio_result.get("allocations") or [],
+                portfolio_result.get("sector_breakdown") or {},
+                float(portfolio_result.get("diversification_score", 0)),
+                str(portfolio_result.get("risk_level", "Low")),
+                str(portfolio_result.get("suggestions", "")),
+                macro_overlay_po,
+            )
+            return _chat_response(
+                {"source": "portfolio_analysis", "result": portfolio_result, "message": msg_po, "query": q},
+                {"last_intent": intent},
+            )
+        return _chat_response({"source": "portfolio_analysis", "result": portfolio_result or {}, "query": q}, {"last_intent": intent})
     if intent in {"portfolio_analysis", "portfolio_rebalance"}:
         return (
             {
@@ -1787,6 +4128,7 @@ async def handle_chat_query(
             mr_label = "uncertain"
 
         result = {
+            "symbol": sym_norm,
             "analysis": "Advisor Recommendation" if intent == "advisor_recommendation" else "Buy Decision",
             "metrics": {
                 "symbol": sym_norm,
@@ -1804,40 +4146,114 @@ async def handle_chat_query(
         }
 
         if intent == "advisor_recommendation":
-            message = _format_advisor_score_message(
-                sym_norm, score_components, final_score_100, final_rec, interpretation_text, risk_factors_text, conclusion_text
+            # Use same standard STOCK ANALYSIS format as buy_decision
+            macro_overlay_ar: List[str] = []
+            try:
+                from app.services.cross_market_service import get_cross_market_signals
+                sigs = get_cross_market_signals() or {}
+                sector_lower = str(sector or "").lower()
+
+                def _overlay_label(key: str, cv: float, cp: float) -> str:
+                    if key == "us_10y_yield":
+                        if "technology" in sector_lower or sym_norm.replace(".NS", "").upper() in {"TCS", "INFY"}:
+                            return "valuation headwind" if cp > 0 else "valuation tailwind" if cp < 0 else "neutral — no pressure"
+                        if "financial" in sector_lower or "bank" in sector_lower:
+                            return "NIM expansion positive" if cp > 0 else "NIM compression risk" if cp < 0 else "stable margin outlook"
+                        return "neutral"
+                    if key == "usd_inr":
+                        if "technology" in sector_lower or sym_norm.replace(".NS", "").upper() in {"TCS", "INFY"}:
+                            return "export revenue tailwind" if cp > 0 else "export revenue headwind" if cp < 0 else "neutral"
+                        return "low direct impact"
+                    if key == "india_vix":
+                        if cv >= 20 and cp > 0:
+                            return "elevated fear — reduce size"
+                        if cv >= 20 and cp < 0:
+                            return "fear easing — cautious entry"
+                        return "calm market — normal sizing"
+                    return "neutral"
+
+                for key, label in [("us_10y_yield", "Bond Yield"), ("usd_inr", "USD/INR"), ("india_vix", "India VIX")]:
+                    s = sigs.get(key) if isinstance(sigs, dict) else None
+                    if s and isinstance(s, dict) and s.get("current_value") is not None:
+                        cv = float(s.get("current_value"))
+                        cp = float(s.get("change_pct") or 0)
+                        hint = _overlay_label(key, cv, cp)
+                        macro_overlay_ar.append(f"{label} {cv:.2f} ({cp:+.2f}%) — {hint}")
+            except Exception:
+                pass
+            div_yield_ar = detail.get("dividendYield") or detail.get("div_yield")
+            if div_yield_ar is not None:
+                try:
+                    div_yield_ar = f"{float(div_yield_ar) * 100:.2f}" if float(div_yield_ar) < 1 else f"{float(div_yield_ar):.2f}"
+                except Exception:
+                    div_yield_ar = "N/A"
+            msg_ar = _format_stock_buy_analysis(
+                sym_norm, final_rec, final_score_100, price, pe, sector, sector_avg_pe,
+                div_yield_ar, int(round(mom_f * 100)), int(round(pred_f * 100)), mr_label,
+                macro_overlay_ar, conclusion_text,
             )
             return _chat_response(
-                {"source": "buy_recommendation", "result": result, "query": q},
+                {"source": "buy_recommendation", "result": result, "message": msg_ar, "query": q},
                 {"last_symbol": sym_norm, "last_intent": "buy_recommendation"},
             )
 
-        # buy_decision: more explicit decision-style formatting
-        clean_sym = str(sym_norm).replace(".NS", "").replace(".BO", "")
-        lines = [
-            f"Buy Decision – {clean_sym}",
-            "",
-            "Valuation / Fundamentals:",
-        ]
-        val_note = f"P/E {pe} vs sector avg ~{sector_avg_pe:.1f}" if pe is not None else f"P/E data unavailable; sector avg ~{sector_avg_pe:.1f}"
-        lines.append(f"- Sector: {sector}")
-        lines.append(f"- {val_note}")
-        lines.append("")
-        lines.append("Momentum:")
-        lines.append(f"- Momentum factor score: {int(round(mom_f * 100))}/100 (higher implies stronger recent trend)")
-        lines.append("")
-        lines.append("AI Prediction:")
-        lines.append(f"- Prediction factor score: {int(round(pred_f * 100))}/100")
-        lines.append("")
-        lines.append("Market Regime:")
-        lines.append(f"- Current regime for NIFTY: {mr_label}")
-        lines.append("")
-        lines.append("Conclusion:")
-        lines.append(f"- Overall: {final_rec} — {interpretation_text}")
-        lines.append(f"- {risk_factors_text}")
-        lines.append("Use this as structured decision support, not a guarantee or personalised financial advice.")
+        # buy_decision: standard STOCK ANALYSIS format with macro overlay
+        macro_overlay: List[str] = []
+        try:
+            from app.services.cross_market_service import get_cross_market_signals
+            sigs = get_cross_market_signals() or {}
+            sector_lower = str(sector or "").lower()
 
-        message = "\n".join(lines)
+            def _overlay_label(key: str, cv: float, cp: float) -> str:
+                if key == "us_10y_yield":
+                    if "technology" in sector_lower or sym_norm.replace(".NS", "").upper() in {"TCS", "INFY"}:
+                        return "valuation headwind" if cp > 0 else "valuation tailwind" if cp < 0 else "neutral — no pressure"
+                    if "financial" in sector_lower or "bank" in sector_lower:
+                        return "NIM expansion positive" if cp > 0 else "NIM compression risk" if cp < 0 else "stable margin outlook"
+                    return "neutral"
+                if key == "usd_inr":
+                    if "technology" in sector_lower or sym_norm.replace(".NS", "").upper() in {"TCS", "INFY"}:
+                        return "export revenue tailwind" if cp > 0 else "export revenue headwind" if cp < 0 else "neutral"
+                    return "low direct impact"
+                if key == "india_vix":
+                    if cv >= 20 and cp > 0:
+                        return "elevated fear — reduce size"
+                    if cv >= 20 and cp < 0:
+                        return "fear easing — cautious entry"
+                    return "calm market — normal sizing"
+                return "neutral"
+
+            for key, label in [("us_10y_yield", "Bond Yield"), ("usd_inr", "USD/INR"), ("india_vix", "India VIX")]:
+                s = sigs.get(key) if isinstance(sigs, dict) else None
+                if s and isinstance(s, dict) and s.get("current_value") is not None:
+                    cv = float(s.get("current_value"))
+                    cp = float(s.get("change_pct") or 0)
+                    hint = _overlay_label(key, cv, cp)
+                    macro_overlay.append(f"{label} {cv:.2f} ({cp:+.2f}%) — {hint}")
+        except Exception:
+            pass
+        div_yield = detail.get("dividendYield") or detail.get("div_yield")
+        if div_yield is not None:
+            try:
+                div_yield = f"{float(div_yield) * 100:.2f}" if float(div_yield) < 1 else f"{float(div_yield):.2f}"
+            except Exception:
+                div_yield = "N/A"
+        conclusion = f"{interpretation_text} {risk_factors_text}"
+        message = _format_stock_buy_analysis(
+            sym_norm,
+            final_rec,
+            final_score_100,
+            price,
+            pe,
+            sector,
+            sector_avg_pe,
+            div_yield,
+            int(round(mom_f * 100)),
+            int(round(pred_f * 100)),
+            mr_label,
+            macro_overlay,
+            conclusion,
+        )
         return _chat_response(
             {"source": "buy_recommendation", "result": result, "message": message, "query": q},
             {"last_symbol": sym_norm, "last_intent": "buy_decision"},

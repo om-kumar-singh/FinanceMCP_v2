@@ -9,9 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import yfinance as yf
-
 from app.services.stock_search_service import resolve_symbol
+from app.utils.yfinance_wrapper import fetch_history, fetch_info
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +57,10 @@ def safe_fetch_history(
         return None, None, "Invalid or unknown symbol"
 
     try:
-        ticker = yf.Ticker(resolved)
         hist = (
-            ticker.history(period=period, interval=interval)
+            fetch_history(resolved, period=period, interval=interval, ttl=60)
             if interval
-            else ticker.history(period=period)
+            else fetch_history(resolved, period=period, ttl=60)
         )
     except Exception as e:
         logger.error(
@@ -92,7 +90,7 @@ def safe_fetch_info(symbol: str | None) -> tuple[dict[str, Any], str | None]:
         return {}, None
 
     try:
-        info = yf.Ticker(resolved).info or {}
+        info = fetch_info(resolved, ttl=300) or {}
         if not isinstance(info, dict):
             return {}, resolved
         return info, resolved

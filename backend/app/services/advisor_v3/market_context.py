@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import yfinance as yf
-
 from app.services.sector_service import SECTOR_STOCKS, get_sector_performance
 
 
@@ -33,8 +31,9 @@ def _index_context(index_symbol: str = "^NSEI") -> Dict[str, Any]:
     Use NIFTY index history to estimate market trend and volatility regime.
     """
     try:
-        ticker = yf.Ticker(index_symbol)
-        hist = ticker.history(period="3mo")
+        from app.utils.yfinance_wrapper import fetch_history
+
+        hist = fetch_history(index_symbol, period="3mo", ttl=60)
     except Exception:
         return {
             "market_regime": "unknown",
